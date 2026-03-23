@@ -731,9 +731,9 @@ class AtmosphericDiffusionModule(nn.Module):
         # Prepare meteorological input (time-averaged)
         meteo_flat = meteo_data.mean(dim=-1).transpose(1, 2).reshape(batch_size * num_nodes, -1)
 
-        # Prepare location input (use buffer-friendly approach)
+        # Prepare location input (ensure float32)
         if isinstance(loc_feature, torch.Tensor):
-            loc_tensor = loc_feature.to(device)
+            loc_tensor = loc_feature.float().to(device)
         else:
             loc_tensor = torch.tensor(loc_feature, dtype=torch.float32, device=device)
         loc_flat = loc_tensor.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * num_nodes, -1)
