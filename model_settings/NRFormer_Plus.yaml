@@ -1,0 +1,55 @@
+data:
+  dataset: 1D-data
+  num_sensors: 3627
+#  batch_size: 8
+  distance: 10
+
+  out_channels: 1
+  in_channels: 1
+  in_length: 24
+  out_length: 24
+
+  train_prop: 0.6
+  valid_prop: 0.2
+
+  DATA_PATH: '../NRFormer_Plus_Datasets'
+
+
+trainer:
+  early_stop: True
+  early_stop_steps: 10
+  print_frequency: 1
+
+  weight_lr: 0.001
+  weight_lr_decay_milestones: [100,200,250]
+  weight_lr_decay_ratio: 0.5
+  weight_decay: 0.0001
+  weight_clip_gradient: 5
+  early_stop_steps: 15
+  seed: 2025
+
+
+model:
+  journal: TKDE
+#  end_channels: 512
+#  hidden_channels: 64
+#
+#  use_RevIN: True
+#
+#  IsLocationEncoder: True
+#  IsLocationInfo: True
+#
+#  Is_wind_angle: True
+#  Is_wind_speed: True
+#  Is_air_temperature: True
+#  Is_dew_point: True
+#
+#  IsDayOfYearEmbedding: False
+#
+#  num_temporal_att_layer: 3
+#  num_spatial_att_layer: 2
+
+
+
+
+
