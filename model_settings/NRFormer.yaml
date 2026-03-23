@@ -12,7 +12,7 @@ data:
   train_prop: 0.6
   valid_prop: 0.2
 
-  DATA_PATH: '../NRFormer_Plus_Datasets'
+  DATA_PATH: '/hpc2hdd/home/tlyu077/code/NRFormer_Plus_Projects/NRFormer_Plus_Datasets'
 
 
 trainer:
