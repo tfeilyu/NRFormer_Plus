@@ -76,8 +76,8 @@ class PGRT2(nn.Module):
             self.tem_num += 1
 
         # 3. Physics-Informed Atmospheric Diffusion Module
-        # Build full adjacency matrix for graph Laplacian in physics module
-        adj_full = mask_support_adj[0].detach().cpu().numpy() + mask_support_adj[1].detach().cpu().numpy()
+        # Reconstruct full adjacency matrix from mask_support_adj (list of row tensors)
+        adj_full = torch.stack(list(mask_support_adj)).detach().cpu().numpy()
         adj_full = (adj_full > 0).astype(float)
         self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_full)
 
