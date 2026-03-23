@@ -358,7 +358,7 @@ if __name__ == "__main__":
         run_name = '{}_train_{}_{}'.format(args.model_name, all_args['model_des'], run_time)
         wandb.init(
             # set the wandb project where this run will be logged
-            project='NRFormer_Plus',
+            project='NRFormer_Plus_TKDE_26',
             name=run_name,
             config=all_args
         )
