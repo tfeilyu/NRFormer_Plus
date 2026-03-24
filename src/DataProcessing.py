@@ -59,8 +59,12 @@ class RadiationDataProcessing:
         if self.use_log_space:
             # Apply log1p to compress 2-order-of-magnitude range (40-7170 nSv/h)
             # Scaler will then normalize in log-space
+            raw_max = train_data.values[train_data.values != 0].max()
             train_data_for_scaler = np.log1p(train_data.values.clip(min=0))
             self.scaler = Scaler(train_data_for_scaler, missing_value=0)
+            # Override max/min with original-space values (for clamp after expm1)
+            self.scaler.max_value = raw_max
+            self.scaler.min_value = 0.0
         else:
             self.scaler = Scaler(train_data.values, missing_value=0)
 
