@@ -30,6 +30,35 @@ finish() {
 }
 
 # ============================================================
+# Iteration 4: LR & Regularization Tuning
+#   i1_log (MAE=2.289, best_ep=3) is still best overall.
+#   Try lower LR to get more stable training + reduce dropout.
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "4" ]; then
+
+LOG="--use_log_space True"
+
+echo "===== Iteration 4: LR & Regularization (3 GPUs parallel) ====="
+
+# GPU 0: log + lower LR 0.0005 (half of default, slower but stabler)
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON $LOG \
+    --model_des i4_lr5e4 --weight_lr 0.0005 &
+
+# GPU 1: log + lower LR + rain gate (combine best features)
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON $LOG \
+    --model_des i4_lr5e4_rain --weight_lr 0.0005 --use_rain_gate True &
+
+# GPU 2: log + LR 0.0003 + rain gate (even lower LR)
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON $LOG \
+    --model_des i4_lr3e4_rain --weight_lr 0.0003 --use_rain_gate True &
+
+echo "3 experiments running on GPU 0,1,2. Waiting..."
+wait
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 1: Log-space + Residual Learning (Data-Driven)
 #   Basis: F1 (ACF=0.946) + F2 (skewness=18, 2 orders of magnitude)
 #   3 experiments on GPU 0,1,2 in parallel
