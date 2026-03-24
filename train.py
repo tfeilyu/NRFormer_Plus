@@ -469,8 +469,11 @@ if __name__ == "__main__":
             # set the wandb project where this run will be logged
             project='NRFormer_Plus_TKDE_26',
             name=run_name,
-            config=all_args
+            config=all_args,
+            save_code=True
         )
+        # Save full source code to wandb for reproducibility
+        wandb.run.log_code(".", include_fn=lambda path: path.endswith((".py", ".yaml", ".sh")))
         upload_project_files_to_wandb()
 
         # track hyperparameters and run metadata
