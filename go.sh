@@ -38,8 +38,9 @@ finish() {
 if [ "$1" == "--iter" ] && [ "$2" == "5" ]; then
 
 BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
-# Match NRFormer's proven temporal attention params: dropout=0.3, ffn_ratio=1, 3 layers
-NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+# Match NRFormer's proven temporal attention params: dropout=0.3, ffn_ratio=1
+# Keep spatial_heads=4 (8 causes OOM with 3627 nodes)
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1"
 
 echo "===== Iteration 5: NRFormer Alignment (3 GPUs parallel) ====="
 
