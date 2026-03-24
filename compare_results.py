@@ -92,7 +92,8 @@ def print_comparison(results, top_n=None):
 
     for r in results:
         params_str = f"{r['num_params']/1e6:.2f}M" if isinstance(r['num_params'], (int, float)) else '?'
-        mape_str = f"{r['test_MAPE']:.2f}%" if isinstance(r['test_MAPE'], (int, float)) else '?'
+        mape_val = r['test_MAPE'] * 100 if isinstance(r['test_MAPE'], (int, float)) and r['test_MAPE'] < 1 else r['test_MAPE']
+        mape_str = f"{mape_val:.2f}%" if isinstance(r['test_MAPE'], (int, float)) else '?'
         print(f"{r['model_des']:<30} {r['dataset']:<8} {str(r['hidden']):>3} {str(r['temp_layers']):>2} "
               f"{str(r['spat_layers']):>2} {str(r['batch_size']):>3} {params_str:>8} "
               f"{str(r['best_epoch']):>5} {r['valid_MAE']:>7.4f} {r['test_MAE']:>7.4f} "

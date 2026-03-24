@@ -17,7 +17,8 @@ build/
 Thumbs.db
 
 # Logs and checkpoints
-logs/
+logs/**/*.pt
+logs/**/*.pth
 wandb/
 *.pt
 *.pth

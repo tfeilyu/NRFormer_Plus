@@ -49,6 +49,9 @@ parser.add_argument('--temporal_dropout', type=float, default=0.1, help='dropout
 parser.add_argument('--ffn_ratio', type=int, default=4, help='FFN expansion ratio in temporal attention')
 parser.add_argument('--spatial_heads', type=int, default=4, help='number of attention heads in spatial module')
 
+parser.add_argument('--use_log_space', type=bool, default=False, help='Iter1: log-space modeling')
+parser.add_argument('--use_residual', type=bool, default=False, help='Iter1: residual prediction')
+
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')
 parser.add_argument('--model_des', type=str, default='111', help='save model param')
@@ -332,7 +335,9 @@ def main():
     true_valid_y = torch.cat(true_valid_y, dim=0)
     # valid_yhat = valid_yhat[:valid_y.size(0), ...]
     valid_pred = scaler.inverse_transform(valid_yhat)
-    valid_pred = torch.clamp(valid_pred, min=scaler.min_value, max=scaler.max_value)
+    if all_args.get('use_log_space', False):
+        valid_pred = torch.expm1(valid_pred)
+    valid_pred = torch.clamp(valid_pred, min=0., max=scaler.max_value)
     valid_mae, valid_mape, valid_rmse = utils.metric(valid_pred, true_valid_y)
 
     log = '{} Average Performance on Valid Data - Valid MAE: {:.4f}, Valid MAPE: {:.4f}, Valid RMSE: {:.4f}'
@@ -358,7 +363,9 @@ def main():
     true_test_y = torch.cat(true_test_y, dim=0)
     # test_yhat = test_yhat[:test_y.size(0), ...]
     test_pred = scaler.inverse_transform(test_yhat)
-    test_pred = torch.clamp(test_pred, min=scaler.min_value, max=scaler.max_value)
+    if all_args.get('use_log_space', False):
+        test_pred = torch.expm1(test_pred)
+    test_pred = torch.clamp(test_pred, min=0., max=scaler.max_value)
     test_mae, test_mape, test_rmse = utils.metric(test_pred, true_test_y)
 
     log = '{} Average Performance on Test Data - Test MAE: {:.4f}, Test MAPE: {:.4f}, Test RMSE: {:.4f} \n'

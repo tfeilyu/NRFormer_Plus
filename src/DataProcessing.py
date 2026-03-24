@@ -53,7 +53,16 @@ class RadiationDataProcessing:
                 train_noaa[name], valid_noaa[name], test_noaa[name] = self.read_noaa(tag=name)
 
         train_data = train_traffic[list(self.nodeID.keys())]
-        self.scaler = Scaler(train_data.values, missing_value=0)
+
+        # Iteration 1a: Log-space transform before normalization
+        self.use_log_space = config.get('use_log_space', False)
+        if self.use_log_space:
+            # Apply log1p to compress 2-order-of-magnitude range (40-7170 nSv/h)
+            # Scaler will then normalize in log-space
+            train_data_for_scaler = np.log1p(train_data.values.clip(min=0))
+            self.scaler = Scaler(train_data_for_scaler, missing_value=0)
+        else:
+            self.scaler = Scaler(train_data.values, missing_value=0)
 
         # data for training & evaluation
         self.get_data_loader(train_traffic, train_noaa, shuffle=True, tag='train')
@@ -76,7 +85,10 @@ class RadiationDataProcessing:
         data_fill = self.fill_traffic(data)
 
         # transform data distribution
-        in_data = np.expand_dims(self.scaler.transform(data_fill.values), axis=-1)  # [T, N, 1]
+        data_values = data_fill.values
+        if self.use_log_space:
+            data_values = np.log1p(data_values.clip(min=0))
+        in_data = np.expand_dims(self.scaler.transform(data_values), axis=-1)  # [T, N, 1]
 
         if self.config['IsLocationInfo']:
             if tag == 'train':

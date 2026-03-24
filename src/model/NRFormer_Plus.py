@@ -40,6 +40,10 @@ class PGRT2(nn.Module):
         if self.config['Is_dew_point']:
             self.noaa_list.append('dew_point')
 
+        # Iteration 1: log-space and residual learning flags
+        self.use_log_space = config.get('use_log_space', False)
+        self.use_residual = config.get('use_residual', False)
+
         self.tem_num = 3
 
         # 1. Data Preprocessing Module
@@ -127,10 +131,16 @@ class PGRT2(nn.Module):
         batch_size, num_features, num_nodes, his_steps = inputs.shape
 
         # 1. Normalize radiation values
+        # Note: if use_log_space=True, radiation is already log1p-transformed in DataProcessing
         radiation = inputs[:, 0:1, :, :].squeeze(1).transpose(1, 2)  # [B, T, N]
+
         if self.config['use_RevIN']:
             radiation = self.revin(radiation, 'norm')
         radiation_norm = radiation.transpose(1, 2).unsqueeze(1)  # [B, 1, N, T]
+
+        # Iteration 1b: Save last known value for residual prediction
+        if self.use_residual:
+            last_value = radiation_norm[:, :, :, -1:]  # [B, 1, N, 1] in normalized space
 
         # 2. Extract features
         # Radiation features
@@ -205,12 +215,19 @@ class PGRT2(nn.Module):
         output = self.end_conv2(output)
         output = output.unsqueeze(dim=1)
 
+        # Iteration 1b: Residual prediction — add last known value
+        if self.use_residual:
+            # output is predicted delta in normalized space: [B, 1, N, out_steps]
+            # last_value: [B, 1, N, 1] broadcasts across out_steps
+            output = last_value + output
+
         # Denormalize
         output = output.squeeze(1).transpose(1, 2)  # [B, T, N]
         if self.config['use_RevIN']:
             output = self.revin(output, 'denorm')
         output = output.transpose(1, 2).unsqueeze(1)  # [B, 1, N, T]
 
+        # Note: if use_log_space=True, inverse log transform (expm1) is applied in trainer
         return output
 
 

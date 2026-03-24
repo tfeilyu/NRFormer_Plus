@@ -10,6 +10,7 @@ class Trainer():
         self.model.to(device)
         self.scaler = scaler
         self.config = config
+        self.use_log_space = config.get('use_log_space', False)
 
         self.iter = 0
         self.task_level = 1
@@ -36,6 +37,14 @@ class Trainer():
             return self.model.module
         return self.model
 
+    def _to_original_space(self, output):
+        """Inverse-transform model output to original radiation space."""
+        predict = self.scaler.inverse_transform(output)
+        if self.use_log_space:
+            predict = torch.expm1(predict)  # exp(x) - 1, inverse of log1p
+        predict = torch.clamp(predict, min=0.)
+        return predict
+
     def train_weight(self, inputs, loc_feature, real_val):
 
         self.weight_optimizer.zero_grad()
@@ -44,8 +53,7 @@ class Trainer():
         output = self.model(inputs, loc_feature)
 
         real = torch.unsqueeze(real_val, dim=1)
-        predict = self.scaler.inverse_transform(output)
-        predict = torch.clamp(predict, min=0.)
+        predict = self._to_original_space(output)
 
         loss = self.loss(predict, real, 0.0)
         loss.backward(retain_graph=False)
@@ -75,9 +83,9 @@ class Trainer():
         with torch.no_grad():
             output = self.model(inputs, loc_feature)
         real = torch.unsqueeze(real_val, dim=1)
-        predict = self.scaler.inverse_transform(output)
+        predict = self._to_original_space(output)
 
-        predict = torch.clamp(predict, min=0., max=self.max_value)
+        predict = torch.clamp(predict, max=self.max_value)
 
         loss = self.loss(predict, real, 0.0)
         mae = utils.masked_mae(predict, real, 0.0).item()
