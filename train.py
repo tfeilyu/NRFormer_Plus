@@ -56,6 +56,9 @@ parser.add_argument('--scheduler', type=str, default='multistep', help='Iter2: m
 parser.add_argument('--warmup_epochs', type=int, default=5, help='Iter2: warmup epochs for cosine scheduler')
 parser.add_argument('--weight_lr', type=float, default=0.001, help='learning rate (override yaml)')
 parser.add_argument('--num_global_nodes', type=int, default=0, help='Iter3: virtual global nodes for spatial attn')
+parser.add_argument('--fusion_type', type=str, default='3way', help='Iter5: 2way or 3way fusion')
+parser.add_argument('--spatial_swap', type=bool, default=False, help='Iter5: swap spatial Q/K and V')
+parser.add_argument('--horizon_weight', type=str, default='none', help='Iter5: none/linear/inverse_acf')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')

@@ -19,6 +19,22 @@ class Trainer():
 
         self.loss = utils.masked_mae
 
+        # Iter5: horizon-dependent loss weighting
+        hw_strategy = config.get('horizon_weight', 'none')
+        if hw_strategy != 'none':
+            H = self.seq_out_len
+            h = torch.arange(1, H + 1, dtype=torch.float32)
+            if hw_strategy == 'linear':
+                w = 1.0 + h / H  # 1.04 → 2.0
+            elif hw_strategy == 'inverse_acf':
+                w = 1.0 / (0.946 ** h + 0.1)  # weight inversely to autocorrelation
+            else:
+                w = torch.ones(H)
+            w = w / w.mean()
+            self.horizon_weights = w.view(1, 1, 1, H)
+        else:
+            self.horizon_weights = None
+
         self.weight_optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=float(config['weight_lr']),
@@ -73,7 +89,14 @@ class Trainer():
         real = torch.unsqueeze(real_val, dim=1)
         predict = self._to_original_space(output)
 
-        loss = self.loss(predict, real, 0.0)
+        if self.horizon_weights is not None:
+            hw = self.horizon_weights.to(predict.device)
+            mask = (real != 0.0).float()
+            mask = mask / torch.mean(mask)
+            mask = torch.where(torch.isnan(mask), torch.zeros_like(mask), mask)
+            loss = torch.mean(torch.abs(predict - real) * mask * hw)
+        else:
+            loss = self.loss(predict, real, 0.0)
         loss.backward(retain_graph=False)
 
         mae = utils.masked_mae(predict, real, 0.0).item()

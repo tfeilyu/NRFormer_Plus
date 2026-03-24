@@ -123,15 +123,23 @@ class PGRT2(nn.Module):
         # 7. Adaptive Spatial Attention
         # self.adaptive_attention = AdaptiveSpatialAttention(config)
 
-        # 8. Gated Fusion + Output Projection
+        # 8. Fusion + Output Projection
         hid = self.config['hidden_channels']
-        # Learnable gates for adaptive weighting of 3 streams
-        self.fusion_gate = nn.Sequential(
-            nn.Linear(hid * 3, hid * 3),
-            nn.Sigmoid()
-        )
-        self.fusion_norm = nn.LayerNorm(hid * 3)
-        end_dim = hid * 3
+        self.fusion_type = config.get('fusion_type', '3way')  # '2way' or '3way'
+        # Iter5: spatial attention input swap (match NRFormer's proven Q/K/V order)
+        self.spatial_swap = config.get('spatial_swap', False)
+
+        if self.fusion_type == '2way':
+            # Match NRFormer: simple concat(x_temporal, x_spatial)
+            end_dim = hid * 2
+        else:
+            # Original 3-way gated fusion
+            self.fusion_gate = nn.Sequential(
+                nn.Linear(hid * 3, hid * 3),
+                nn.Sigmoid()
+            )
+            self.fusion_norm = nn.LayerNorm(hid * 3)
+            end_dim = hid * 3
         self.end_conv1 = nn.Linear(end_dim, self.config['end_channels'])
         self.end_conv2 = nn.Linear(self.config['end_channels'], self.config['out_length'] * self.config['out_channels'])
 
@@ -235,26 +243,35 @@ class PGRT2(nn.Module):
         x_temporal = self.temporal_fusion(x_temporal).squeeze(dim=-1).transpose(1, 2)
 
         # 6. spatial learning
+        # Iter5: spatial_swap=True matches NRFormer's Q/K=fused, V=raw pattern
+        if self.spatial_swap:
+            sp_qk, sp_v = x_temporal, rad_feat
+        else:
+            sp_qk, sp_v = rad_feat, x_temporal
+
         if self.num_global_nodes > 0:
-            # Append virtual global nodes (connected to all, no masking)
             K = self.num_global_nodes
             g_tokens = self.global_tokens.expand(batch_size, -1, -1)
             g_tokens_v = self.global_tokens_v.expand(batch_size, -1, -1)
-            rad_feat_aug = torch.cat([rad_feat, g_tokens], dim=1)       # [B, N+K, H]
-            x_temporal_aug = torch.cat([x_temporal, g_tokens_v], dim=1) # [B, N+K, H]
-            # Extend mask: global nodes are never masked (False = attend)
+            sp_qk_aug = torch.cat([sp_qk, g_tokens], dim=1)
+            sp_v_aug = torch.cat([sp_v, g_tokens_v], dim=1)
             N = num_nodes
             mask_aug = torch.zeros(N + K, N + K, dtype=torch.bool, device=self.mask.device)
-            mask_aug[:N, :N] = self.mask  # original mask for real nodes
-            x_spatial = self.LightTransfer(rad_feat_aug, x_temporal_aug, mask_aug)
-            x_spatial = x_spatial[:, :num_nodes, :]  # remove virtual nodes
+            mask_aug[:N, :N] = self.mask
+            x_spatial = self.LightTransfer(sp_qk_aug, sp_v_aug, mask_aug)
+            x_spatial = x_spatial[:, :num_nodes, :]
         else:
-            x_spatial = self.LightTransfer(rad_feat, x_temporal, self.mask)
+            x_spatial = self.LightTransfer(sp_qk, sp_v, self.mask)
 
-        # 8. Gated fusion + Output projection
-        concat = torch.cat([rad_feat, x_temporal, x_spatial], dim=-1)
-        gate = self.fusion_gate(concat)
-        output = self.fusion_norm(concat * gate)
+        # 8. Fusion + Output projection
+        if self.fusion_type == '2way':
+            # Match NRFormer: simple concat
+            output = torch.cat([x_temporal, x_spatial], dim=-1)
+        else:
+            # 3-way gated fusion
+            concat = torch.cat([rad_feat, x_temporal, x_spatial], dim=-1)
+            gate = self.fusion_gate(concat)
+            output = self.fusion_norm(concat * gate)
         output = self.end_conv1(output)
         output = F.relu(output)
         output = self.end_conv2(output)

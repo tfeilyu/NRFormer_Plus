@@ -30,6 +30,40 @@ finish() {
 }
 
 # ============================================================
+# Iteration 5: Architectural Alignment with NRFormer
+#   Root cause: NRFormer+ deviates from NRFormer's proven design
+#   in ways that HURT performance. Fix the damage first.
+#   Base: i2_cosine_rain (log + cosine + rain)
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "5" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+# Match NRFormer's proven temporal attention params: dropout=0.3, ffn_ratio=1, 3 layers
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+
+echo "===== Iteration 5: NRFormer Alignment (3 GPUs parallel) ====="
+
+# GPU 0: align temporal+spatial params only (keep 3way fusion)
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON $BEST $NRFIX \
+    --model_des i5_align &
+
+# GPU 1: align + 2way fusion + spatial swap (full NRFormer match)
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON $BEST $NRFIX \
+    --model_des i5_full --fusion_type 2way --spatial_swap True &
+
+# GPU 2: align + 2way + spatial swap + horizon weighting + drop wind
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON $BEST $NRFIX \
+    --model_des i5_full_hw --fusion_type 2way --spatial_swap True \
+    --horizon_weight inverse_acf \
+    --Is_wind_angle False --Is_wind_speed False &
+
+echo "3 experiments running on GPU 0,1,2. Waiting..."
+wait
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 4: LR & Regularization Tuning
 #   i1_log (MAE=2.289, best_ep=3) is still best overall.
 #   Try lower LR to get more stable training + reduce dropout.
