@@ -43,9 +43,11 @@ parser.add_argument('--IsDayOfYearEmbedding', type=bool, default=False, help='NR
 parser.add_argument('--num_temporal_att_layer', type=int, default=2, help='NRFormer, NRFormer_Plus')
 parser.add_argument('--num_spatial_att_layer', type=int, default=2, help='NRFormer, NRFormer_Plus')
 
-parser.add_argument('--hidden_channels', type=int, default=32, help='NRFormer, NRFormer_Plus')
-parser.add_argument('--end_channels', type=int, default=512, help='NRFormer, NRFormer_Plus')
-
+parser.add_argument('--hidden_channels', type=int, default=32, help='hidden dimension')
+parser.add_argument('--end_channels', type=int, default=512, help='output projection dimension')
+parser.add_argument('--temporal_dropout', type=float, default=0.1, help='dropout in temporal self-attention')
+parser.add_argument('--ffn_ratio', type=int, default=4, help='FFN expansion ratio in temporal attention')
+parser.add_argument('--spatial_heads', type=int, default=4, help='number of attention heads in spatial module')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')
@@ -112,9 +114,19 @@ def main():
     his_valid_time = []
     his_train_time = []
     his_valid_loss = []
+    # Epoch history for analysis
+    epoch_history = {'epoch': [], 'train_loss': [], 'train_mae': [], 'train_rmse': [],
+                     'valid_loss': [], 'valid_mae': [], 'valid_rmse': [],
+                     'lr': [], 'grad_norm': []}
     min_valid_loss = 1000
     best_epoch = 0
     all_start_time = time.time()
+
+    # Save config snapshot
+    import json
+    config_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_config.json'
+    with open(config_path, 'w') as f:
+        json.dump({k: str(v) if isinstance(v, (torch.device, type)) else v for k, v in all_args.items()}, f, indent=2, default=str)
 
     print("start training...\n", flush=True)
     for epoch in range(best_epoch+1, best_epoch+args.epochs+1):
@@ -124,21 +136,20 @@ def main():
         train_mae = []
         train_mape = []
         train_rmse = []
+        train_grad_norm = []
         train_start_time = time.time()
         dataloader['train_loader'].shuffle()
         for iter, (x, y) in enumerate(dataloader['train_loader'].get_iterator()):
-            # print(iter)
             train_x = torch.Tensor(x).to(device)
             train_x = train_x.transpose(1, 3)
             train_y = torch.Tensor(y).to(device)
             train_y = train_y.transpose(1, 3)
-            # input x (64, 2, 207, 12)
-            # input y (64, 207, 12)
             train_metrics = engine.train_weight(train_x, sensors_location, train_y[:, 0, :, :])
             train_loss.append(train_metrics[0])
             train_mae.append(train_metrics[1])
             train_mape.append(train_metrics[2])
             train_rmse.append(train_metrics[3])
+            train_grad_norm.append(train_metrics[4])
         engine.weight_scheduler.step()
 
         train_end_time = time.time()
@@ -191,14 +202,36 @@ def main():
         print(log_loss.format(mean_train_loss, mean_train_mae, mean_train_mape, mean_train_rmse, t_time,
                               mean_valid_loss, mean_valid_mae, mean_valid_mape, mean_valid_rmse, v_time),flush=True)
 
-        wandb.log({'Epoch': epoch,
+        current_lr = engine.get_lr()
+        mean_grad_norm = np.mean(train_grad_norm)
+
+        # Record epoch history
+        epoch_history['epoch'].append(epoch)
+        epoch_history['train_loss'].append(mean_train_loss)
+        epoch_history['train_mae'].append(mean_train_mae)
+        epoch_history['train_rmse'].append(mean_train_rmse)
+        epoch_history['valid_loss'].append(mean_valid_loss)
+        epoch_history['valid_mae'].append(mean_valid_mae)
+        epoch_history['valid_rmse'].append(mean_valid_rmse)
+        epoch_history['lr'].append(current_lr)
+        epoch_history['grad_norm'].append(mean_grad_norm)
+
+        log_dict = {'Epoch': epoch,
                    'Epoch Search/Train Loss': mean_train_loss, 'Epoch Search/Train MAE': mean_train_mae,
                    'Epoch Search/Train MAPE': mean_train_mape, 'Epoch Search/Train RMSE': mean_train_rmse,
                    'Epoch Search/Train Time': t_time,
-
                    'Epoch Valid Loss': mean_valid_loss, 'Epoch Valid MAE': mean_valid_mae,
                    'Epoch Valid MAPE': mean_valid_mape, 'Epoch Valid RMSE': mean_valid_rmse,
-                   'Epoch Valid Time': v_time})
+                   'Epoch Valid Time': v_time,
+                   'learning_rate': current_lr, 'grad_norm': mean_grad_norm}
+
+        # Physics diagnostics (every 10 epochs)
+        if epoch % 10 == 0:
+            physics_diag = engine.get_physics_diagnostics()
+            if physics_diag:
+                log_dict.update({f'physics/{k}': v for k, v in physics_diag.items()})
+
+        wandb.log(log_dict)
 
         if mean_valid_loss < min_valid_loss:
             best_epoch = epoch
@@ -219,6 +252,47 @@ def main():
             break
 
     all_end_time = time.time()
+
+    # Save epoch history CSV
+    import pandas as pd
+    history_df = pd.DataFrame(epoch_history)
+    history_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_epoch_history.csv'
+    history_df.to_csv(history_path, index=False)
+    print(f"Epoch history saved to {history_path}")
+
+    # Generate training curves
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+        axes[0, 0].plot(history_df['epoch'], history_df['train_loss'], label='Train')
+        axes[0, 0].plot(history_df['epoch'], history_df['valid_loss'], label='Valid')
+        axes[0, 0].set_xlabel('Epoch'); axes[0, 0].set_ylabel('Loss')
+        axes[0, 0].legend(); axes[0, 0].set_title('Loss')
+
+        axes[0, 1].plot(history_df['epoch'], history_df['train_mae'], label='Train')
+        axes[0, 1].plot(history_df['epoch'], history_df['valid_mae'], label='Valid')
+        axes[0, 1].set_xlabel('Epoch'); axes[0, 1].set_ylabel('MAE')
+        axes[0, 1].legend(); axes[0, 1].set_title('MAE')
+
+        axes[1, 0].plot(history_df['epoch'], history_df['lr'])
+        axes[1, 0].set_xlabel('Epoch'); axes[1, 0].set_ylabel('LR')
+        axes[1, 0].set_title('Learning Rate')
+
+        axes[1, 1].plot(history_df['epoch'], history_df['grad_norm'])
+        axes[1, 1].set_xlabel('Epoch'); axes[1, 1].set_ylabel('Grad Norm')
+        axes[1, 1].set_title('Gradient Norm')
+
+        plt.tight_layout()
+        fig_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_curves.png'
+        plt.savefig(fig_path, dpi=150)
+        plt.close()
+        wandb.log({'training_curves': wandb.Image(str(fig_path))})
+        print(f"Training curves saved to {fig_path}")
+    except Exception as e:
+        print(f"Warning: could not generate plots: {e}")
 
     print('\n')
     print(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))

@@ -219,16 +219,23 @@ class SelfAttention(nn.Module):
         super(SelfAttention, self).__init__()
         self.hidden_channels = config['hidden_channels']
         self.num_temporal_att_layer = config['num_temporal_att_layer']
+        dropout = config.get('temporal_dropout', 0.1)
+        ffn_dim = self.hidden_channels * config.get('ffn_ratio', 4)
+
+        # Learned temporal positional encoding
+        in_length = config.get('in_length', 24)
+        self.temporal_pe = nn.Parameter(torch.randn(1, in_length, 1, self.hidden_channels) * 0.02)
 
         self.time_series_learning = nn.ModuleList(
             [
-                SelfAttentionLayer(self.hidden_channels, self.hidden_channels, num_heads=4, dropout=0.3)
+                SelfAttentionLayer(self.hidden_channels, ffn_dim, num_heads=4, dropout=dropout)
                 for _ in range(self.num_temporal_att_layer)
             ]
         )
 
     def forward(self, x):
-        x = x.transpose(1, 3)
+        x = x.transpose(1, 3)  # [B, T, N, D]
+        x = x + self.temporal_pe  # add temporal positional encoding
         for attn in self.time_series_learning:
             x = attn(x, dim=1)
         x = x.transpose(1, 3)
@@ -341,7 +348,7 @@ class LightGFormer(nn.Module):
     def __init__(self, config):
         super(LightGFormer, self).__init__()
 
-        self.heads = 8
+        self.heads = config.get('spatial_heads', 4)
         self.layers = config['num_spatial_att_layer']
         self.hid_dim = config['hidden_channels']
 
@@ -762,6 +769,16 @@ class AtmosphericDiffusionModule(nn.Module):
 
         physics_out = self.physics_encoder(physics_features)
         physics_out = physics_out.reshape(batch_size, num_nodes, -1)
+
+        # Store diagnostics for external logging
+        self._last_diagnostics = {
+            'D_mean': diffusion_coeff.mean().item(),
+            'D_std': diffusion_coeff.std().item(),
+            'D_min': diffusion_coeff.min().item(),
+            'D_max': diffusion_coeff.max().item(),
+            'laplacian_abs_mean': laplacian.abs().mean().item(),
+            'temporal_grad_std': temporal_grad.std().item(),
+        }
 
         return physics_out
 

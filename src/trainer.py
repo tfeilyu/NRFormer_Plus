@@ -1,6 +1,5 @@
 import torch.optim as optim
 import math
-# from net import *
 import torch
 from src import utils
 
@@ -36,13 +35,11 @@ class Trainer():
         self.weight_optimizer.zero_grad()
         self.model.train()
 
-        # input (64, 2, 207, 12)
         output = self.model(inputs, loc_feature)
-        # output (64, 1, 207, 12)
 
         real = torch.unsqueeze(real_val, dim=1)
         predict = self.scaler.inverse_transform(output)
-        predict = torch.clamp(predict, min=0.)  # consistent with eval clamping
+        predict = torch.clamp(predict, min=0.)
 
         loss = self.loss(predict, real, 0.0)
         loss.backward(retain_graph=False)
@@ -51,17 +48,25 @@ class Trainer():
         mape = utils.masked_mape(predict, real, 0.0).item()
         rmse = utils.masked_rmse(predict, real, 0.0).item()
 
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['weight_clip_gradient'])
+        grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config['weight_clip_gradient'])
         self.weight_optimizer.step()
         self.weight_optimizer.zero_grad()
 
-        return loss.item(), mae, mape, rmse
+        return loss.item(), mae, mape, rmse, grad_norm.item()
+
+    def get_lr(self):
+        return self.weight_optimizer.param_groups[0]['lr']
+
+    def get_physics_diagnostics(self):
+        """Get diagnostics from physics module if available."""
+        if hasattr(self.model, 'physics_module') and hasattr(self.model.physics_module, '_last_diagnostics'):
+            return self.model.physics_module._last_diagnostics
+        return None
 
     def eval(self, inputs, loc_feature, real_val):
         self.model.eval()
         with torch.no_grad():
             output = self.model(inputs, loc_feature)
-        # output = output.transpose(1, 3)
         real = torch.unsqueeze(real_val, dim=1)
         predict = self.scaler.inverse_transform(output)
 
