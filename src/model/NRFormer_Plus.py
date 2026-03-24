@@ -735,40 +735,42 @@ class AtmosphericDiffusionModule(nn.Module):
         batch_size, _, num_nodes, num_steps = radiation_data.shape
         device = radiation_data.device
 
-        # Prepare meteorological input (time-averaged)
-        meteo_flat = meteo_data.mean(dim=-1).transpose(1, 2).reshape(batch_size * num_nodes, -1)
+        # Prepare meteorological input (time-averaged): [B, N, C_m]
+        meteo_avg = meteo_data.mean(dim=-1).transpose(1, 2)  # [B, N, C_m]
 
-        # Prepare location input (ensure float32)
+        # Prepare location input (ensure float32): [N, 2]
         if isinstance(loc_feature, torch.Tensor):
             loc_tensor = loc_feature.float().to(device)
         else:
             loc_tensor = torch.tensor(loc_feature, dtype=torch.float32, device=device)
-        loc_flat = loc_tensor.unsqueeze(0).expand(batch_size, -1, -1).reshape(batch_size * num_nodes, -1)
+        if loc_tensor.dim() == 1:
+            loc_tensor = loc_tensor.unsqueeze(-1)
+        # Broadcast to [B, N, 2]
+        loc_expanded = loc_tensor.unsqueeze(0).expand(batch_size, -1, -1)
 
-        # Estimate spatially-varying diffusion coefficient D
-        diff_input = torch.cat([meteo_flat, loc_flat], dim=-1)
-        diffusion_coeff = self.diffusion_net(diff_input)  # [B*N, 1]
+        # Estimate spatially-varying diffusion coefficient D: [B, N, 1]
+        diff_input = torch.cat([meteo_avg, loc_expanded], dim=-1)  # [B, N, C_m+2]
+        diffusion_coeff = self.diffusion_net(diff_input)  # [B, N, 1]
 
         # Current radiation concentration
-        rad_current = radiation_data[:, 0, :, -1]  # [B, N] - latest timestep
+        rad_current = radiation_data[:, 0, :, -1]  # [B, N]
 
-        # Compute graph Laplacian: nabla^2(C) = A_norm @ C - C (neighbor avg minus self)
+        # Compute graph Laplacian: nabla^2(C) = A_norm @ C - C
         laplacian = self.compute_graph_laplacian(rad_current)  # [B, N]
 
         # Approximate temporal gradient dC/dt from the input sequence
         rad_sequence = radiation_data[:, 0, :, :]  # [B, N, T]
         temporal_grad = self.temporal_grad_net(rad_sequence).squeeze(-1)  # [B, N]
 
-        # Physics triplet: [C, D, nabla^2(C), dC/dt]
-        physics_features = torch.cat([
-            rad_current.reshape(batch_size * num_nodes, 1),
-            diffusion_coeff,
-            laplacian.reshape(batch_size * num_nodes, 1),
-            temporal_grad.reshape(batch_size * num_nodes, 1)
-        ], dim=-1)
+        # Physics triplet: [C, D, nabla^2(C), dC/dt] -> [B, N, 4]
+        physics_features = torch.stack([
+            rad_current,
+            diffusion_coeff.squeeze(-1),
+            laplacian,
+            temporal_grad
+        ], dim=-1)  # [B, N, 4]
 
-        physics_out = self.physics_encoder(physics_features)
-        physics_out = physics_out.reshape(batch_size, num_nodes, -1)
+        physics_out = self.physics_encoder(physics_features)  # [B, N, hidden_dim]
 
         # Store diagnostics for external logging
         self._last_diagnostics = {
