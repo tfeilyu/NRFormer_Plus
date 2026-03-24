@@ -96,6 +96,12 @@ def main():
 
     num_Params = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', num_Params)
+
+    # Multi-GPU DataParallel
+    if torch.cuda.device_count() > 1:
+        print(f'Using {torch.cuda.device_count()} GPUs with DataParallel')
+        model = torch.nn.DataParallel(model)
+
     wandb.log({'num_params': num_Params})
 
     # Unique run ID: model_des + timestamp
@@ -235,13 +241,7 @@ def main():
 
         if mean_valid_loss < min_valid_loss:
             best_epoch = epoch
-            states = {
-                'net': engine.model.state_dict(),
-                'weight_optimizer': engine.weight_optimizer.state_dict(),
-                'weight_scheduler': engine.weight_scheduler.state_dict(),
-                'best_epoch': best_epoch
-            }
-            torch.save(obj=states, f=train_model_path)
+            engine.save(train_model_path, best_epoch)
             print('[eval]\tepoch {}\tsave parameters to {}\n'.format(best_epoch, train_model_path))
             min_valid_loss = mean_valid_loss
 

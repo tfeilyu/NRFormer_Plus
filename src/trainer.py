@@ -30,6 +30,12 @@ class Trainer():
             gamma=float(config['weight_lr_decay_ratio'])
         )
 
+    def _get_raw_model(self):
+        """Unwrap DataParallel if needed."""
+        if isinstance(self.model, torch.nn.DataParallel):
+            return self.model.module
+        return self.model
+
     def train_weight(self, inputs, loc_feature, real_val):
 
         self.weight_optimizer.zero_grad()
@@ -59,8 +65,9 @@ class Trainer():
 
     def get_physics_diagnostics(self):
         """Get diagnostics from physics module if available."""
-        if hasattr(self.model, 'physics_module') and hasattr(self.model.physics_module, '_last_diagnostics'):
-            return self.model.physics_module._last_diagnostics
+        raw_model = self._get_raw_model()
+        if hasattr(raw_model, 'physics_module') and hasattr(raw_model.physics_module, '_last_diagnostics'):
+            return raw_model.physics_module._last_diagnostics
         return None
 
     def eval(self, inputs, loc_feature, real_val):
@@ -80,13 +87,18 @@ class Trainer():
 
     def load(self, model_path):
         states = torch.load(model_path)
-
-        # load net
-        self.model.load_state_dict(states['net'])
-
-        # load optimizer
+        raw_model = self._get_raw_model()
+        raw_model.load_state_dict(states['net'])
         self.weight_optimizer.load_state_dict(states['weight_optimizer'])
         self.weight_scheduler.load_state_dict(states['weight_scheduler'])
-
-        # load historical records
         return states['best_epoch']
+
+    def save(self, model_path, best_epoch):
+        raw_model = self._get_raw_model()
+        states = {
+            'net': raw_model.state_dict(),
+            'weight_optimizer': self.weight_optimizer.state_dict(),
+            'weight_scheduler': self.weight_scheduler.state_dict(),
+            'best_epoch': best_epoch
+        }
+        torch.save(obj=states, f=model_path)
