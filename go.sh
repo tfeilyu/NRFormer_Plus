@@ -89,9 +89,10 @@ fi
 # ============================================================
 # Default: Run single experiment (quick iteration)
 # ============================================================
-echo "===== Running single experiment on $DATASET ====="
+DES=${1:-"default"}
+echo "===== Running single experiment on $DATASET (des=$DES) ====="
 python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des $1 \
+    --model_des $DES \
     --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
