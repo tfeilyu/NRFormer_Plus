@@ -57,6 +57,36 @@ exit 0
 fi
 
 # ============================================================
+# Iteration 2: Training Strategy + Rain-aware Gate
+#   Basis: i1_log stopped at epoch 3 (LR too high, oscillation)
+#          + F3 (radon washout: humid +1.25 nSv/h)
+#   Build on best config: log-space
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "2" ]; then
+
+LOG="--use_log_space True"
+
+echo "===== Iteration 2: Training Strategy + Rain Gate (3 GPUs parallel) ====="
+
+# GPU 0: log + cosine schedule with warmup (fix oscillation)
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON $LOG \
+    --model_des i2_cosine --scheduler cosine --warmup_epochs 5 --weight_lr 0.001 &
+
+# GPU 1: log + rain-aware gate
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON $LOG \
+    --model_des i2_rain --use_rain_gate True &
+
+# GPU 2: log + cosine + rain gate (combined)
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON $LOG \
+    --model_des i2_cosine_rain --scheduler cosine --warmup_epochs 5 --weight_lr 0.001 --use_rain_gate True &
+
+echo "3 experiments running on GPU 0,1,2. Waiting..."
+wait
+finish
+exit 0
+fi
+
+# ============================================================
 # Phase 1: Capacity Search — 3 exps on GPU 0,1,2 in parallel
 # ============================================================
 if [ "$1" == "--phase" ] && [ "$2" == "1" ]; then

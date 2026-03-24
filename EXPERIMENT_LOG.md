@@ -207,45 +207,61 @@ output = last_value + predicted_delta  # residual connection
 
 **Experiments:**
 
-| Exp ID | Log-space | Residual | hidden | epochs | Test MAE | Test RMSE | Test MAPE | vs NRFormer |
-|--------|-----------|----------|--------|--------|----------|-----------|-----------|-------------|
-| i1_baseline | No | No | 32 | 200 | - | - | - | - |
-| i1_log | Yes | No | 32 | 200 | - | - | - | - |
-| i1_res | No | Yes | 32 | 200 | - | - | - | - |
-| i1_log_res | Yes | Yes | 32 | 200 | - | - | - | - |
+| Exp ID | Log-space | Residual | Best Ep | T-MAE | T-RMSE | T-MAPE | vs baseline MAE |
+|--------|-----------|----------|---------|-------|--------|--------|----------------|
+| p1_baseline | No | No | 10 | 2.3231 | 10.981 | 3.01% | — |
+| **i1_log** | **Yes** | No | **3** | **2.2893** | **10.541** | **2.99%** | **-1.5%** |
+| i1_res | No | Yes | 10 | 2.3017 | 10.501 | 3.01% | -0.9% |
+| i1_log_res | Yes | Yes | 10 | 2.3089 | 10.469 | 3.01% | -0.6% |
 
-**Analysis:** (fill after experiments)
+Per-horizon MAE (best: i1_log):
+| Horizon | NRFormer | p1_baseline | **i1_log** | Gap to NRFormer |
+|---------|----------|-------------|------------|----------------|
+| 6th | 1.84 | 2.107 | **2.068** | +12.4% |
+| 12th | 2.01 | 2.379 | **2.302** | +14.5% |
+| 24th | 2.28 | 2.734 | **2.722** | +19.4% |
 
-**Decision:** (which combination to keep)
+**Analysis:**
+- **Log-space wins on MAE** (-1.5%), confirming data analysis F2 (compressing 2 orders of magnitude helps)
+- **Residual wins on RMSE** (-4.4%), confirming F1 (leveraging high autocorrelation reduces extreme errors)
+- **Combined (log+res) doesn't stack** — MAE worse than log alone, possibly because residual in log-space has different semantics
+- **i1_log trained only 3 epochs** before early stopping — LR=0.001 causes oscillation, significant room for improvement with better training strategy
+
+**Decision:** Keep **log-space** as base config. Fix training strategy in Iteration 2.
 
 ---
 
-### Iteration 2: Rain-aware Gating
+### Iteration 2: Training Strategy + Rain-aware Gating
 
 **Date:** TBD
 
 **Data motivation:**
+- i1_log trained only 3 epochs before early stopping — LR oscillation after fast convergence
 - F3: Radon washout confirmed — humid days see +1.25 nSv/h radiation spike
-- Sudden changes affect 3500+ stations simultaneously, driven by precipitation
 
 **Technical changes:**
-```python
-# Compute dryness index
-dryness = air_temperature - dew_point  # [B, N, T]
-rain_gate = torch.sigmoid(-self.rain_fc(dryness.mean(dim=-1)))  # [B, N, 1]
 
-# Gate meteorological/physics features
-meteo_feat = meteo_feat * (1 + rain_gate * self.rain_scale)
-physics_feat = physics_feat * (1 + rain_gate * self.physics_boost)
+**A. Cosine annealing with warmup** (fix LR oscillation):
+```python
+# 5-epoch linear warmup (0.1x → 1x LR) + cosine decay to 1e-6
+scheduler = SequentialLR([LinearLR(start_factor=0.1), CosineAnnealingLR(eta_min=1e-6)])
 ```
 
-**Experiments:**
+**B. Rain-aware gating** (boost physics/meteo during rain):
+```python
+dryness = air_temperature - dew_point  # [B, N, T]
+rain_gate = sigmoid(MLP(-dryness))     # high when humid
+physics_constraint *= (1 + rain_gate)
+meteo_feat *= (1 + rain_gate)
+```
 
-| Exp ID | Rain gate | rain_scale init | Test MAE | Test RMSE | Test MAPE | Δ MAE |
-|--------|-----------|----------------|----------|-----------|-----------|-------|
-| i2_no_gate | No | - | - | - | - | baseline |
-| i2_gate_01 | Yes | 0.1 | - | - | - | - |
-| i2_gate_05 | Yes | 0.5 | - | - | - | - |
+**Experiments** (all on log-space base):
+
+| Exp ID | Cosine+warmup | Rain gate | T-MAE | T-RMSE | T-MAPE | vs i1_log |
+|--------|--------------|-----------|-------|--------|--------|-----------|
+| i2_cosine | Yes | No | - | - | - | - |
+| i2_rain | No | Yes | - | - | - | - |
+| i2_cosine_rain | Yes | Yes | - | - | - | - |
 
 **Analysis:** (fill after)
 

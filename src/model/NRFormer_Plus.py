@@ -44,6 +44,20 @@ class PGRT2(nn.Module):
         self.use_log_space = config.get('use_log_space', False)
         self.use_residual = config.get('use_residual', False)
 
+        # Iteration 2: rain-aware gating
+        self.use_rain_gate = config.get('use_rain_gate', False)
+        if self.use_rain_gate and 'air_temperature' in self.noaa_list and 'dew_point' in self.noaa_list:
+            self.temp_idx = self.noaa_list.index('air_temperature')
+            self.dew_idx = self.noaa_list.index('dew_point')
+            self.rain_gate_net = nn.Sequential(
+                nn.Linear(self.in_steps, self.hidden_dim),
+                nn.ReLU(),
+                nn.Linear(self.hidden_dim, 1),
+                nn.Sigmoid()
+            )
+        else:
+            self.use_rain_gate = False
+
         self.tem_num = 3
 
         # 1. Data Preprocessing Module
@@ -187,6 +201,17 @@ class PGRT2(nn.Module):
         # propagation_feat = self.wind_propagation(
         #     rad_feat, meteo_data, loc_feature
         # )  # [B, N, hidden_dim]
+
+        # Iteration 2: Rain-aware gating — boost physics/meteo features during humid conditions
+        if self.use_rain_gate:
+            # dryness_index = air_temperature - dew_point (low = humid/rainy)
+            air_temp = meteo_data[:, self.temp_idx, :, :]   # [B, N, T]
+            dew_point = meteo_data[:, self.dew_idx, :, :]   # [B, N, T]
+            dryness = air_temp - dew_point                   # [B, N, T]
+            rain_gate = self.rain_gate_net(-dryness)          # [B, N, 1], high when humid
+            # Boost physics and meteo features during rain events
+            physics_constraint = physics_constraint * (1.0 + rain_gate)
+            meteo_feat = meteo_feat * (1.0 + rain_gate)
 
         # 5. temporal fusion
         emb = [rad_feat, physics_constraint]

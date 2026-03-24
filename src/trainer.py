@@ -25,11 +25,29 @@ class Trainer():
             weight_decay=float(config['weight_decay'])
         )
 
-        self.weight_scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            optimizer=self.weight_optimizer,
-            milestones=list(config['weight_lr_decay_milestones']),
-            gamma=float(config['weight_lr_decay_ratio'])
-        )
+        # Iteration 2: support cosine annealing with warmup
+        scheduler_type = config.get('scheduler', 'multistep')
+        if scheduler_type == 'cosine':
+            warmup_epochs = config.get('warmup_epochs', 5)
+            total_epochs = config.get('epochs', 200)
+            # Cosine annealing after warmup
+            cosine_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.weight_optimizer, T_max=total_epochs - warmup_epochs, eta_min=1e-6
+            )
+            # Linear warmup
+            warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+                self.weight_optimizer, start_factor=0.1, total_iters=warmup_epochs
+            )
+            self.weight_scheduler = torch.optim.lr_scheduler.SequentialLR(
+                self.weight_optimizer, schedulers=[warmup_scheduler, cosine_scheduler],
+                milestones=[warmup_epochs]
+            )
+        else:
+            self.weight_scheduler = torch.optim.lr_scheduler.MultiStepLR(
+                optimizer=self.weight_optimizer,
+                milestones=list(config['weight_lr_decay_milestones']),
+                gamma=float(config['weight_lr_decay_ratio'])
+            )
 
     def _get_raw_model(self):
         """Unwrap DataParallel if needed."""

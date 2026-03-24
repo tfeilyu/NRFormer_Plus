@@ -51,6 +51,10 @@ parser.add_argument('--spatial_heads', type=int, default=4, help='number of atte
 
 parser.add_argument('--use_log_space', type=bool, default=False, help='Iter1: log-space modeling')
 parser.add_argument('--use_residual', type=bool, default=False, help='Iter1: residual prediction')
+parser.add_argument('--use_rain_gate', type=bool, default=False, help='Iter2: rain-aware gating')
+parser.add_argument('--scheduler', type=str, default='multistep', help='Iter2: multistep or cosine')
+parser.add_argument('--warmup_epochs', type=int, default=5, help='Iter2: warmup epochs for cosine scheduler')
+parser.add_argument('--weight_lr', type=float, default=0.001, help='learning rate (override yaml)')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')
@@ -72,7 +76,9 @@ else:
 device = torch.device('cuda:{}'.format(args.gpu_ids[0])) if args.gpu_ids else torch.device('cpu')
 model_args['device'] = device
 
-all_args = {**vars(args), **model_args, **data_args, **trainer_args}
+# CLI args override yaml (cli_overrides applied last)
+cli_overrides = {k: v for k, v in vars(args).items() if v is not None}
+all_args = {**vars(args), **model_args, **data_args, **trainer_args, **cli_overrides}
 
 # data processing
 TFdata = RadiationDataProcessing(all_args)
