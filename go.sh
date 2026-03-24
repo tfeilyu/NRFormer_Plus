@@ -9,7 +9,7 @@
 #   python compare_results.py     # Compare all experiment results
 # ============================================================
 
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0
 MODEL="NRFormer_Plus"
 DATASET="1D-data"       # Start with 1D-data (faster), then 4H-data
 EPOCHS=200

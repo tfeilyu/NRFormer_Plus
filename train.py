@@ -97,10 +97,10 @@ def main():
     num_Params = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', num_Params)
 
-    # Multi-GPU DataParallel
-    if torch.cuda.device_count() > 1:
-        print(f'Using {torch.cuda.device_count()} GPUs with DataParallel')
-        model = torch.nn.DataParallel(model)
+    # Multi-GPU: disabled for now (buffer compatibility issues with DataParallel)
+    # if torch.cuda.device_count() > 1:
+    #     print(f'Using {torch.cuda.device_count()} GPUs with DataParallel')
+    #     model = torch.nn.DataParallel(model)
 
     wandb.log({'num_params': num_Params})
 
