@@ -55,7 +55,7 @@ class RadiationDataProcessing:
         train_data = train_traffic[list(self.nodeID.keys())]
 
         # Iteration 1a: Log-space transform before normalization
-        self.use_log_space = config.get('use_log_space', False)
+        self.use_log_space = self.config.get('use_log_space', False)
         if self.use_log_space:
             # Apply log1p to compress 2-order-of-magnitude range (40-7170 nSv/h)
             # Scaler will then normalize in log-space
