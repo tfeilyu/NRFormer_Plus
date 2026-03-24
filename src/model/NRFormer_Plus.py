@@ -640,12 +640,12 @@ class LocationEncoder(nn.Module):
         self._loc_buffer = None
 
     def forward(self, loc_feature, batch_size):
-        # Cache location tensor on device to avoid repeated tensor creation
-        if self._loc_buffer is None or self._loc_buffer.device != next(self.parameters()).device:
+        device = self.loc_mlp[0].weight.device
+        if self._loc_buffer is None or self._loc_buffer.device != device:
             if isinstance(loc_feature, torch.Tensor):
-                self._loc_buffer = loc_feature.float().to(next(self.parameters()).device)
+                self._loc_buffer = loc_feature.float().to(device)
             else:
-                self._loc_buffer = torch.tensor(loc_feature, dtype=torch.float32).to(next(self.parameters()).device)
+                self._loc_buffer = torch.tensor(loc_feature, dtype=torch.float32).to(device)
         loc_embedding = self.loc_mlp(self._loc_buffer)
         return loc_embedding.unsqueeze(0).expand(batch_size, -1, -1)
 
