@@ -14,6 +14,19 @@ MODEL="NRFormer_Plus"
 DATASET="1D-data"       # Start with 1D-data (faster), then 4H-data
 EPOCHS=200
 
+# Auto compare + git push after experiments
+finish() {
+    echo ""
+    echo "===== Comparing all experiment results ====="
+    python compare_results.py
+    echo ""
+    echo "===== Pushing results to GitHub ====="
+    git add logs/ EXPERIMENT_LOG.md 2>/dev/null
+    git commit -m "Auto: experiment results $(date '+%Y%m%d-%H%M%S')" 2>/dev/null
+    git push 2>/dev/null && echo "Push OK" || echo "Push failed (check git auth)"
+    echo "===== All done ====="
+}
+
 # ============================================================
 # Phase 1: Baseline + Architecture Fixes (已修复FFN/PE/dropout)
 # ============================================================
@@ -39,7 +52,7 @@ python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
     --hidden_channels 96 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
-echo "===== Phase 1 Done. Run: python compare_results.py ====="
+finish
 exit 0
 fi
 
@@ -82,7 +95,7 @@ python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
     --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
-echo "===== Phase 2 Done. Run: python compare_results.py ====="
+finish
 exit 0
 fi
 
@@ -96,4 +109,4 @@ python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
     --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
-echo "===== Done. Run: python compare_results.py ====="
+finish
