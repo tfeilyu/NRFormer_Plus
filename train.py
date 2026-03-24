@@ -98,18 +98,15 @@ def main():
     print('Number of model parameters is', num_Params)
     wandb.log({'num_params': num_Params})
 
-    save_folder = Path('logs') / args.model_name / args.dataset
+    # Unique run ID: model_des + timestamp
+    run_id = f'{args.model_des}_{run_time}'
+    save_folder = Path('logs') / args.model_name / args.dataset / run_id
     save_folder.mkdir(parents=True, exist_ok=True)
+    print(f'Experiment logs will be saved to: {save_folder}')
 
-    train_model_path = os.path.join(save_folder, args.model_name+'_'+args.dataset+'_best_train_model_'+str(args.model_des)+'.pt')
+    train_model_path = os.path.join(save_folder, 'best_model.pt')
 
     engine = Trainer(model, all_args, scaler, device)
-    # try:
-    #     best_epoch = engine.load(train_model_path)
-    #     print('load architecture [epoch {}] from {} [done]'.format(best_epoch, train_model_path))
-    # except:
-    #     print('load model failed!')
-
 
     his_valid_time = []
     his_train_time = []
@@ -122,11 +119,14 @@ def main():
     best_epoch = 0
     all_start_time = time.time()
 
-    # Save config snapshot
+    # Save config snapshot with all hyperparameters
     import json
-    config_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_config.json'
+    config_path = save_folder / 'config.json'
+    save_config = {k: str(v) if isinstance(v, (torch.device, type)) else v for k, v in all_args.items()}
+    save_config['num_params'] = num_Params
+    save_config['run_id'] = run_id
     with open(config_path, 'w') as f:
-        json.dump({k: str(v) if isinstance(v, (torch.device, type)) else v for k, v in all_args.items()}, f, indent=2, default=str)
+        json.dump(save_config, f, indent=2, default=str)
 
     print("start training...\n", flush=True)
     for epoch in range(best_epoch+1, best_epoch+args.epochs+1):
@@ -256,7 +256,7 @@ def main():
     # Save epoch history CSV
     import pandas as pd
     history_df = pd.DataFrame(epoch_history)
-    history_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_epoch_history.csv'
+    history_path = save_folder / 'epoch_history.csv'
     history_df.to_csv(history_path, index=False)
     print(f"Epoch history saved to {history_path}")
 
@@ -286,7 +286,7 @@ def main():
         axes[1, 1].set_title('Gradient Norm')
 
         plt.tight_layout()
-        fig_path = save_folder / f'{args.model_name}_{args.dataset}_{args.model_des}_curves.png'
+        fig_path = save_folder / 'training_curves.png'
         plt.savefig(fig_path, dpi=150)
         plt.close()
         wandb.log({'training_curves': wandb.Image(str(fig_path))})
@@ -399,6 +399,24 @@ def main():
         mae_avg.append(metrics_avg[0])
         mape_avg.append(metrics_avg[1])
         rmse_avg.append(metrics_avg[2])
+
+    # Save test results summary
+    results = {
+        'best_epoch': int(best_epoch),
+        'num_params': num_Params,
+        'valid': {'MAE': valid_mae, 'MAPE': valid_mape, 'RMSE': valid_rmse},
+        'test': {'MAE': test_mae, 'MAPE': test_mape, 'RMSE': test_rmse},
+        'per_horizon': {}
+    }
+    for idx, step in enumerate(step_list):
+        results['per_horizon'][f'step_{step}'] = {
+            'MAE': mae[idx], 'MAPE': mape[idx], 'RMSE': rmse[idx],
+            'MAE_avg': mae_avg[idx], 'MAPE_avg': mape_avg[idx], 'RMSE_avg': rmse_avg[idx]
+        }
+    results_path = save_folder / 'results.json'
+    with open(results_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f'Results saved to {results_path}')
 
     wandb.finish()
     return valid_mae, valid_mape, valid_rmse, test_mae, test_mape, test_rmse, mae, mape, rmse, mae_avg, mape_avg, rmse_avg
