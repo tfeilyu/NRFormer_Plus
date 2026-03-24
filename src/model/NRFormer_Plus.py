@@ -243,7 +243,9 @@ class PGRT2(nn.Module):
             rad_feat_aug = torch.cat([rad_feat, g_tokens], dim=1)       # [B, N+K, H]
             x_temporal_aug = torch.cat([x_temporal, g_tokens_v], dim=1) # [B, N+K, H]
             # Extend mask: global nodes are never masked (False = attend)
-            mask_aug = F.pad(self.mask, (0, K, 0, K), value=False)      # [N+K, N+K]
+            N = num_nodes
+            mask_aug = torch.zeros(N + K, N + K, dtype=torch.bool, device=self.mask.device)
+            mask_aug[:N, :N] = self.mask  # original mask for real nodes
             x_spatial = self.LightTransfer(rad_feat_aug, x_temporal_aug, mask_aug)
             x_spatial = x_spatial[:, :num_nodes, :]  # remove virtual nodes
         else:
