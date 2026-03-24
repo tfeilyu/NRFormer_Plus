@@ -1,27 +1,98 @@
 #!/bin/bash
+# ============================================================
+# NRFormer+ TKDE Iterative Experiment Runner
+#
+# Usage:
+#   bash go.sh                    # Run current experiment
+#   bash go.sh --phase 1          # Run Phase 1 experiments
+#   bash go.sh --phase 2          # Run Phase 2 experiments
+#   python compare_results.py     # Compare all experiment results
+# ============================================================
 
-# ========================================
-# NRFormer+ TKDE Experiments
-# ========================================
-
+export CUDA_VISIBLE_DEVICES=0,1,2,3
 MODEL="NRFormer_Plus"
-EPOCHS=300
-DES="optimized_v1"
+DATASET="1D-data"       # Start with 1D-data (faster), then 4H-data
+EPOCHS=200
 
-# --- 1D-data (Daily resolution) ---
-echo "========== Training on 1D-data =========="
-python train.py --model_name $MODEL --dataset 1D-data --epochs $EPOCHS --model_des $DES \
-    --IsDayOfYearEmbedding True --num_temporal_att_layer 3 --num_spatial_att_layer 2
+# ============================================================
+# Phase 1: Baseline + Architecture Fixes (已修复FFN/PE/dropout)
+# ============================================================
+if [ "$1" == "--phase" ] && [ "$2" == "1" ]; then
 
-# echo "========== Testing on 1D-data =========="
-# python test.py --model_name $MODEL --dataset 1D-data --model_des $DES
+echo "===== Phase 1: Baseline Calibration ====="
 
-# --- 4H-data (4-Hour resolution) ---
-echo "========== Training on 4H-data =========="
-python train.py --model_name $MODEL --dataset 4H-data --epochs $EPOCHS --model_des $DES \
-    --IsDayOfYearEmbedding True --num_temporal_att_layer 3 --num_spatial_att_layer 2
+# Exp 1.0: Baseline (current defaults after all fixes)
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p1_baseline \
+    --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
-# echo "========== Testing on 4H-data =========="
-# python test.py --model_name $MODEL --dataset 4H-data --model_des $DES
+# Exp 1.1: hidden=64
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p1_h64 \
+    --hidden_channels 64 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
 
-echo "========== All experiments done =========="
+# Exp 1.2: hidden=96
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p1_h96 \
+    --hidden_channels 96 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+echo "===== Phase 1 Done. Run: python compare_results.py ====="
+exit 0
+fi
+
+# ============================================================
+# Phase 2: Depth & Regularization (用Phase 1最佳hidden_channels)
+# ============================================================
+if [ "$1" == "--phase" ] && [ "$2" == "2" ]; then
+
+BEST_H=64  # <-- Update after Phase 1 analysis
+
+echo "===== Phase 2: Depth & Regularization (hidden=$BEST_H) ====="
+
+# Exp 2.1: temporal_layers=4
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p2_t4 \
+    --hidden_channels $BEST_H --num_temporal_att_layer 4 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+# Exp 2.2: spatial_layers=3
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p2_s3 \
+    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 3 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+# Exp 2.3: both deeper
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p2_t4s3 \
+    --hidden_channels $BEST_H --num_temporal_att_layer 4 --num_spatial_att_layer 3 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+# Exp 2.4: batch_size=16
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p2_bs16 --batch_size 16 \
+    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+# Exp 2.5: batch_size=32
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des p2_bs32 --batch_size 32 \
+    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+echo "===== Phase 2 Done. Run: python compare_results.py ====="
+exit 0
+fi
+
+# ============================================================
+# Default: Run single experiment (quick iteration)
+# ============================================================
+echo "===== Running single experiment on $DATASET ====="
+python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
+    --model_des $1 \
+    --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
+    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+
+echo "===== Done. Run: python compare_results.py ====="
