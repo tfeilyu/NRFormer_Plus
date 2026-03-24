@@ -44,6 +44,12 @@ class PGRT2(nn.Module):
         self.use_log_space = config.get('use_log_space', False)
         self.use_residual = config.get('use_residual', False)
 
+        # Iteration 3: virtual global nodes for spatial attention
+        self.num_global_nodes = config.get('num_global_nodes', 0)
+        if self.num_global_nodes > 0:
+            self.global_tokens = nn.Parameter(torch.randn(1, self.num_global_nodes, self.hidden_dim) * 0.02)
+            self.global_tokens_v = nn.Parameter(torch.randn(1, self.num_global_nodes, self.hidden_dim) * 0.02)
+
         # Iteration 2: rain-aware gating
         self.use_rain_gate = config.get('use_rain_gate', False)
         if self.use_rain_gate and 'air_temperature' in self.noaa_list and 'dew_point' in self.noaa_list:
@@ -229,7 +235,19 @@ class PGRT2(nn.Module):
         x_temporal = self.temporal_fusion(x_temporal).squeeze(dim=-1).transpose(1, 2)
 
         # 6. spatial learning
-        x_spatial = self.LightTransfer(rad_feat, x_temporal, self.mask)
+        if self.num_global_nodes > 0:
+            # Append virtual global nodes (connected to all, no masking)
+            K = self.num_global_nodes
+            g_tokens = self.global_tokens.expand(batch_size, -1, -1)
+            g_tokens_v = self.global_tokens_v.expand(batch_size, -1, -1)
+            rad_feat_aug = torch.cat([rad_feat, g_tokens], dim=1)       # [B, N+K, H]
+            x_temporal_aug = torch.cat([x_temporal, g_tokens_v], dim=1) # [B, N+K, H]
+            # Extend mask: global nodes are never masked (False = attend)
+            mask_aug = F.pad(self.mask, (0, K, 0, K), value=False)      # [N+K, N+K]
+            x_spatial = self.LightTransfer(rad_feat_aug, x_temporal_aug, mask_aug)
+            x_spatial = x_spatial[:, :num_nodes, :]  # remove virtual nodes
+        else:
+            x_spatial = self.LightTransfer(rad_feat, x_temporal, self.mask)
 
         # 8. Gated fusion + Output projection
         concat = torch.cat([rad_feat, x_temporal, x_spatial], dim=-1)
@@ -397,7 +415,8 @@ class LightGFormer(nn.Module):
         self.attention_layer = LightformerLayer(self.hid_dim, self.heads, self.hid_dim * 4)
         self.attention_norm = nn.LayerNorm(self.hid_dim)
         self.attention = Lightformer(self.attention_layer, self.layers, self.attention_norm)
-        self.lpos = LearnedPositionalEncoding(self.hid_dim, max_len=config['num_sensors'])
+        max_nodes = config['num_sensors'] + config.get('num_global_nodes', 0)
+        self.lpos = LearnedPositionalEncoding(self.hid_dim, max_len=max_nodes)
 
     def forward(self, input, input_v, mask):
         # print('hid_dim: ', self.hid_dim)

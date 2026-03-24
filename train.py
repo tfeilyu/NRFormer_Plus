@@ -55,6 +55,7 @@ parser.add_argument('--use_rain_gate', type=bool, default=False, help='Iter2: ra
 parser.add_argument('--scheduler', type=str, default='multistep', help='Iter2: multistep or cosine')
 parser.add_argument('--warmup_epochs', type=int, default=5, help='Iter2: warmup epochs for cosine scheduler')
 parser.add_argument('--weight_lr', type=float, default=0.001, help='learning rate (override yaml)')
+parser.add_argument('--num_global_nodes', type=int, default=0, help='Iter3: virtual global nodes for spatial attn')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')

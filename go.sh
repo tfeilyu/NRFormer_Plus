@@ -57,6 +57,35 @@ exit 0
 fi
 
 # ============================================================
+# Iteration 3: Multi-scale Spatial + Best Config Combos
+#   Basis: F4 (235 isolated nodes), F5 (636km anomaly range)
+#   Build on best: log-space + cosine+rain (best 24-step)
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "3" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+
+echo "===== Iteration 3: Virtual Global Nodes + Combos (3 GPUs parallel) ====="
+
+# GPU 0: best config + 5 global nodes
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON $BEST \
+    --model_des i3_g5 --num_global_nodes 5 &
+
+# GPU 1: best config + 10 global nodes
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON $BEST \
+    --model_des i3_g10 --num_global_nodes 10 &
+
+# GPU 2: best config + 20 global nodes
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON $BEST \
+    --model_des i3_g20 --num_global_nodes 20 &
+
+echo "3 experiments running on GPU 0,1,2. Waiting..."
+wait
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 2: Training Strategy + Rain-aware Gate
 #   Basis: i1_log stopped at epoch 3 (LR too high, oscillation)
 #          + F3 (radon washout: humid +1.25 nSv/h)
