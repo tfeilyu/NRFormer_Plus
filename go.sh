@@ -3,16 +3,17 @@
 # NRFormer+ TKDE Iterative Experiment Runner
 #
 # Usage:
-#   bash go.sh                    # Run current experiment
-#   bash go.sh --phase 1          # Run Phase 1 experiments
-#   bash go.sh --phase 2          # Run Phase 2 experiments
-#   python compare_results.py     # Compare all experiment results
+#   bash go.sh --phase 1          # Run Phase 1: 3 exps on 3 GPUs in parallel
+#   bash go.sh --phase 2          # Run Phase 2: 5 exps across GPUs
+#   bash go.sh test_name          # Run single experiment on GPU 0
+#   bash go.sh test_name 2        # Run single experiment on GPU 2
+#   python compare_results.py     # Compare all results
 # ============================================================
 
-export CUDA_VISIBLE_DEVICES=0
 MODEL="NRFormer_Plus"
-DATASET="1D-data"       # Start with 1D-data (faster), then 4H-data
+DATASET="1D-data"
 EPOCHS=200
+COMMON="--model_name $MODEL --dataset $DATASET --epochs $EPOCHS --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4"
 
 # Auto compare + git push after experiments
 finish() {
@@ -28,85 +29,78 @@ finish() {
 }
 
 # ============================================================
-# Phase 1: Baseline + Architecture Fixes (已修复FFN/PE/dropout)
+# Phase 1: Capacity Search — 3 exps on GPU 0,1,2 in parallel
 # ============================================================
 if [ "$1" == "--phase" ] && [ "$2" == "1" ]; then
 
-echo "===== Phase 1: Baseline Calibration ====="
+echo "===== Phase 1: Baseline Calibration (3 GPUs parallel) ====="
 
-# Exp 1.0: Baseline (current defaults after all fixes)
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p1_baseline \
-    --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+# GPU 0: hidden=32
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON \
+    --model_des p1_baseline --hidden_channels 32 \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2 &
 
-# Exp 1.1: hidden=64
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p1_h64 \
-    --hidden_channels 64 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+# GPU 1: hidden=64
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON \
+    --model_des p1_h64 --hidden_channels 64 \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2 &
 
-# Exp 1.2: hidden=96
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p1_h96 \
-    --hidden_channels 96 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+# GPU 2: hidden=96
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON \
+    --model_des p1_h96 --hidden_channels 96 \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2 &
 
+echo "3 experiments running on GPU 0,1,2. Waiting..."
+wait
 finish
 exit 0
 fi
 
 # ============================================================
-# Phase 2: Depth & Regularization (用Phase 1最佳hidden_channels)
+# Phase 2: Depth & Batch Size — 4 GPUs parallel, 2 rounds
 # ============================================================
 if [ "$1" == "--phase" ] && [ "$2" == "2" ]; then
 
 BEST_H=64  # <-- Update after Phase 1 analysis
 
-echo "===== Phase 2: Depth & Regularization (hidden=$BEST_H) ====="
+echo "===== Phase 2 Round 1: Depth (hidden=$BEST_H, GPU 0-2) ====="
 
-# Exp 2.1: temporal_layers=4
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p2_t4 \
-    --hidden_channels $BEST_H --num_temporal_att_layer 4 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON \
+    --model_des p2_t4 --hidden_channels $BEST_H \
+    --num_temporal_att_layer 4 --num_spatial_att_layer 2 &
 
-# Exp 2.2: spatial_layers=3
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p2_s3 \
-    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 3 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON \
+    --model_des p2_s3 --hidden_channels $BEST_H \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 3 &
 
-# Exp 2.3: both deeper
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p2_t4s3 \
-    --hidden_channels $BEST_H --num_temporal_att_layer 4 --num_spatial_att_layer 3 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+CUDA_VISIBLE_DEVICES=2 python train.py $COMMON \
+    --model_des p2_t4s3 --hidden_channels $BEST_H \
+    --num_temporal_att_layer 4 --num_spatial_att_layer 3 &
 
-# Exp 2.4: batch_size=16
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p2_bs16 --batch_size 16 \
-    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+wait
+echo "===== Phase 2 Round 2: Batch size (GPU 0-1) ====="
 
-# Exp 2.5: batch_size=32
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des p2_bs32 --batch_size 32 \
-    --hidden_channels $BEST_H --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+CUDA_VISIBLE_DEVICES=0 python train.py $COMMON \
+    --model_des p2_bs16 --batch_size 16 --hidden_channels $BEST_H \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2 &
 
+CUDA_VISIBLE_DEVICES=1 python train.py $COMMON \
+    --model_des p2_bs32 --batch_size 32 --hidden_channels $BEST_H \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2 &
+
+wait
 finish
 exit 0
 fi
 
 # ============================================================
-# Default: Run single experiment (quick iteration)
+# Default: Single experiment
 # ============================================================
 DES=${1:-"default"}
-echo "===== Running single experiment on $DATASET (des=$DES) ====="
-python train.py --model_name $MODEL --dataset $DATASET --epochs $EPOCHS \
-    --model_des $DES \
-    --hidden_channels 32 --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
-    --IsDayOfYearEmbedding True --temporal_dropout 0.1 --ffn_ratio 4 --spatial_heads 4
+GPU=${2:-"0"}
+echo "===== Running experiment '$DES' on GPU $GPU ====="
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON \
+    --model_des $DES --hidden_channels 32 \
+    --num_temporal_att_layer 3 --num_spatial_att_layer 2
 
 finish
