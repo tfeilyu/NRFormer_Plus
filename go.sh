@@ -41,24 +41,25 @@ BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate 
 # Match NRFormer's proven temporal attention params
 NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
 
-echo "===== Iteration 5: NRFormer Alignment (3 GPUs parallel) ====="
+GPU=${3:-"0"}
+echo "===== Iteration 5: NRFormer Alignment (sequential on GPU $GPU) ====="
 
-# GPU 0: align temporal+spatial params only (keep 3way fusion)
-CUDA_VISIBLE_DEVICES=0 python train.py $COMMON $BEST $NRFIX \
-    --model_des i5_align &
+# Exp 1: align temporal+spatial params only (keep 3way fusion)
+echo "[1/3] i5_align"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX \
+    --model_des i5_align
 
-# GPU 1: align + 2way fusion + spatial swap (full NRFormer match)
-CUDA_VISIBLE_DEVICES=1 python train.py $COMMON $BEST $NRFIX \
-    --model_des i5_full --fusion_type 2way --spatial_swap True &
+# Exp 2: align + 2way fusion + spatial swap (full NRFormer match)
+echo "[2/3] i5_full"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX \
+    --model_des i5_full --fusion_type 2way --spatial_swap True
 
-# GPU 2: align + 2way + spatial swap + horizon weighting + drop wind
-CUDA_VISIBLE_DEVICES=2 python train.py $COMMON $BEST $NRFIX \
+# Exp 3: align + 2way + spatial swap + horizon weighting + drop wind
+echo "[3/3] i5_full_hw"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX \
     --model_des i5_full_hw --fusion_type 2way --spatial_swap True \
     --horizon_weight inverse_acf \
-    --Is_wind_angle False --Is_wind_speed False &
-
-echo "3 experiments running on GPU 0,1,2. Waiting..."
-wait
+    --Is_wind_angle False --Is_wind_speed False
 finish
 exit 0
 fi
