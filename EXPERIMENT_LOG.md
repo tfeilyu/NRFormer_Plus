@@ -101,8 +101,13 @@ Iteration 6 (P1): Region-aware Attention Bias             ✅ Done (BEST)
     Basis: F6 (prefecture 3.45x clustering)
     Result: r20 MAE=2.267, best overall — but still +12-16% behind NRFormer
 
-Iteration 7 (planned): Simplification Ablation / Regional Physics
-    Basis: 12-16% gap remains, need to identify root cause
+Iteration 7a: Regional Coherence Physics                  ✅ Done (negative result)
+    Basis: F7 (diffusion model wrong)
+    Result: All configs worse than i6_r20 — physics module itself is the problem
+
+Iteration 7b (in progress): Simplification Ablation
+    Basis: NRFormer vs NRFormer+ 逐行对比发现 3 个关键架构差异
+    Experiments: no_physics, v_tmlp, simple_meteo, minimal, pure
 ```
 
 ---
@@ -477,6 +482,51 @@ Per-horizon MAE:
 
 ---
 
+### Iteration 7a: Regional Coherence Physics (原始方案)
+
+**Date:** 2026-03-25
+
+**Data motivation:**
+- F7: 扩散模型不合理 (D=5814 km²/day)，改用区域同步响应模型
+- 在 i6_r20 基础上替换 AtmosphericDiffusionModule → RegionalCoherenceModule
+
+**Technical changes:**
+```python
+# RegionalCoherenceModule: 用区域均值+偏差+天气驱动 替代 Laplacian 扩散
+regional_mean = scatter_mean(C, cluster_ids)  # 区域平均
+deviation = C - regional_mean[cluster_ids]    # 站点偏差
+weather_forcing = weather_net(meteo_avg)       # 天气驱动力
+# 输出: physics_encoder([C, deviation, weather_forcing, dC/dt])
+```
+
+**Base config:** i6_r20 (log + cosine + rain + NRFIX + 2way + swap + r20)
+
+**Experiments:**
+
+| Exp ID | Physics type | Clusters | Best Ep | T-MAE | T-RMSE | T-MAPE | vs i6_r20 |
+|--------|-------------|----------|---------|-------|--------|--------|-----------|
+| i7_regional | Regional | 20 | 9 | 2.3146 | 10.881 | 3.02% | +2.1% (worse) |
+| i7_r25 | Regional | 25 | 9 | 2.3217 | 10.777 | 3.04% | +2.4% (worse) |
+| i7_r25_diff | Diffusion (control) | 25 | 9 | 2.3127 | 10.714 | 3.02% | +2.0% (worse) |
+
+Per-horizon MAE:
+| Horizon | i6_r20 | i7_regional | i7_r25 | i7_r25_diff |
+|---------|--------|-------------|--------|-------------|
+| 6th | 2.077 | 2.090 | 2.093 | 2.082 |
+| 12th | 2.289 | 2.357 | 2.371 | 2.358 |
+| 24th | 2.648 | 2.749 | 2.759 | 2.734 |
+
+**Analysis:**
+- **RegionalCoherenceModule 全面更差** — 替换扩散模型并没有改善，反而退步
+- **Control (i7_r25_diff) 也更差** — 增加到 25 clusters 没有帮助 (r20 就是最优)
+- **训练都在 epoch 9 就 early stop** — 比 i6_r20 (epoch 19) 短得多，说明新模块引入了不稳定性
+- **核心结论**: 问题不在于扩散模型 vs 同步模型的选择，而在于 **physics module 本身可能就是多余的**
+- 这直接推动了 Iteration 7b 的方向：尝试完全去掉 physics module
+
+**Decision:** 放弃 RegionalCoherenceModule 路线。转向 **simplification ablation** — 诊断 physics module 是否应该存在。
+
+---
+
 ## Current Best Config Summary (i6_r20)
 
 ```bash
@@ -531,13 +581,16 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 | 11 | i1_log_res | log+residual | 2.309 | 10.469 | 2.107 | 2.368 | 2.725 | 10 |
 | 12 | i2_rain | log+rain | 2.310 | 10.729 | 2.083 | 2.366 | 2.721 | 9 |
 | 13 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 2.076 | 2.348 | 2.732 | 9 |
-| 14 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 2.083 | 2.370 | 2.685 | 13 |
-| 15 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 2.107 | 2.379 | 2.734 | 10 |
-| 16 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 2.090 | 2.365 | 2.770 | 9 |
-| 17 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 2.096 | 2.376 | 2.740 | 9 |
-| 18 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
-| 19 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
-| 20 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
+| 14 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 2.082 | 2.358 | 2.734 | 9 |
+| 15 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 2.083 | 2.370 | 2.685 | 13 |
+| 16 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 2.090 | 2.357 | 2.749 | 9 |
+| 17 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 2.093 | 2.371 | 2.759 | 9 |
+| 18 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 2.107 | 2.379 | 2.734 | 10 |
+| 19 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 2.090 | 2.365 | 2.770 | 9 |
+| 20 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 2.096 | 2.376 | 2.740 | 9 |
+| 21 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
+| 22 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
+| 23 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
 
 ---
 
@@ -550,10 +603,11 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 5. **Rain gate 效果微弱** — 数据分析的 F3 (radon washout) 虽然在统计上显著，但对模型的贡献很小
 6. **残差学习不适用于 log-space** — log 空间里的残差语义不同，两者组合反而更差
 7. **训练稳定性很重要** — cosine warmup 让训练从 3 epoch → 13-19 epoch，间接提升了性能
+8. **RegionalCoherenceModule 也不行** — 替换扩散模型为区域同步模型同样更差，问题不在于物理模型的种类，而在于 physics module 本身可能是多余的
 
 ---
 
-### Iteration 7: Simplification & Root Cause Ablation
+### Iteration 7b: Simplification & Root Cause Ablation
 
 **Date:** 2026-03-25
 
