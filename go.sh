@@ -30,10 +30,14 @@ finish() {
 }
 
 # ============================================================
-# Iteration 7: Regional Coherence Physics + Region Attention
-#   Replace wrong Laplacian diffusion with synchronous response model.
-#   Data: no propagation (9.5% sync), lag-0 dominance, D=5814 unrealistic.
-#   Build on best: i6_r20 (region clusters=20 + all previous best)
+# Iteration 7: Simplification & Root Cause Ablation
+#   i6_r20 is best (MAE=2.267) but still 12-16% behind NRFormer.
+#   Root cause analysis identified 3 key differences from NRFormer:
+#     1. Physics module (NRFormer has none) — may add noise
+#     2. Spatial V uses rad_feat; NRFormer uses temporal_mlp
+#     3. MeteoEncoder too complex (768-dim intermediate vs 96-dim)
+#   Strategy: ablate each suspect, plus combined "minimal" config.
+#   Base: i6_r20 (log + cosine + rain + NRFIX + 2way + swap + r20)
 # ============================================================
 if [ "$1" == "--iter" ] && [ "$2" == "7" ]; then
 
@@ -41,24 +45,36 @@ BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate 
 NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
 ARCH="--fusion_type 2way --spatial_swap True"
 REGION="--num_region_clusters 20"
+PATIENCE="--early_stop_steps 30"
 
 GPU=${3:-"0"}
-echo "===== Iteration 7: Regional Coherence Physics (sequential on GPU $GPU) ====="
+echo "===== Iteration 7: Simplification Ablation (sequential on GPU $GPU) ====="
 
-# Exp 1: regional physics + r20 (replace diffusion, keep everything else)
-echo "[1/3] i7_regional"
-CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
-    --model_des i7_regional --physics_type regional
+# Exp 1: Remove physics module (biggest suspect)
+echo "[1/5] i7_no_physics"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i7_no_physics --use_physics False
 
-# Exp 2: regional physics + r25 (try finer clustering)
-echo "[2/3] i7_r25"
-CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
-    --model_des i7_r25 --physics_type regional --num_region_clusters 25
+# Exp 2: Change spatial V to temporal_mlp (match NRFormer's proven V input)
+echo "[2/5] i7_v_tmlp"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i7_v_tmlp --spatial_v_source temporal_mlp
 
-# Exp 3: diffusion physics + r25 (control: more clusters with old physics)
-echo "[3/3] i7_r25_diff"
-CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
-    --model_des i7_r25_diff --num_region_clusters 25
+# Exp 3: Simplify meteo encoder (NRFormer-style flatten)
+echo "[3/5] i7_simple_meteo"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i7_simple_meteo --simple_meteo True
+
+# Exp 4: Combined — no physics + temporal_mlp V + simple meteo (maximum NRFormer alignment)
+echo "[4/5] i7_minimal"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i7_minimal --use_physics False --spatial_v_source temporal_mlp --simple_meteo True
+
+# Exp 5: Combined minimal + no rain gate (strip everything non-essential)
+echo "[5/5] i7_pure"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i7_pure --use_log_space True --scheduler cosine --warmup_epochs 5 \
+    --use_physics False --spatial_v_source temporal_mlp --simple_meteo True
 
 finish
 exit 0

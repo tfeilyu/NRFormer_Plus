@@ -73,7 +73,17 @@ class PGRT2(nn.Module):
         else:
             self.use_rain_gate = False
 
-        self.tem_num = 3
+        # Iteration 7: disable physics module entirely
+        self.use_physics = config.get('use_physics', True)
+
+        # Iteration 7: simplified meteo encoder (NRFormer-style flatten)
+        self.simple_meteo = config.get('simple_meteo', False)
+
+        # Iteration 7: spatial V source — 'rad' (current) or 'temporal_mlp' (NRFormer-style)
+        self.spatial_v_source = config.get('spatial_v_source', 'rad')
+
+        # tem_num counts features going into temporal fusion
+        self.tem_num = 2 if self.use_physics else 1  # rad_feat + physics (or just rad_feat)
 
         # 1. Data Preprocessing Module
         if self.config['use_RevIN']:
@@ -87,9 +97,11 @@ class PGRT2(nn.Module):
         self.end_time_series = nn.Conv2d(in_channels=self.config['hidden_channels'] * self.config['in_length'],
                                          out_channels=self.config['hidden_channels'], kernel_size=(1, 1), bias=True)
 
-        # self.radiation_encoder = nn.Conv2d(1, self.hidden_dim, kernel_size=(1, 1))
-        if len(self.noaa_list)>0:
-            self.meteo_encoder = MeteorologicalEncoder(config, self.noaa_list)
+        if len(self.noaa_list) > 0:
+            if self.simple_meteo:
+                self.meteo_encoder = SimpleMeteoEncoder(config, self.noaa_list)
+            else:
+                self.meteo_encoder = MeteorologicalEncoder(config, self.noaa_list)
 
         if self.config['IsLocationEncoder']:
             self.location_encoder = LocationEncoder(config)
@@ -108,16 +120,17 @@ class PGRT2(nn.Module):
             self.temporal_encoder = TemporalEncoder(config)
             self.tem_num += 1
 
-        # 3. Physics Module
-        # Reconstruct [N, N] adjacency from row-wise tensor list
-        adj_np = torch.stack(mask_support_adj).detach().cpu().numpy()
-        adj_np = (adj_np > 0).astype(float)
-        self.physics_type = config.get('physics_type', 'diffusion')
-        if self.physics_type == 'regional':
-            self.physics_module = RegionalCoherenceModule(
-                config, self.noaa_list, adj_matrix=adj_np, cluster_ids=cluster_ids)
-        else:
-            self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
+        # 3. Physics Module (can be disabled with use_physics=False)
+        if self.use_physics:
+            # Reconstruct [N, N] adjacency from row-wise tensor list
+            adj_np = torch.stack(mask_support_adj).detach().cpu().numpy()
+            adj_np = (adj_np > 0).astype(float)
+            self.physics_type = config.get('physics_type', 'diffusion')
+            if self.physics_type == 'regional':
+                self.physics_module = RegionalCoherenceModule(
+                    config, self.noaa_list, adj_matrix=adj_np, cluster_ids=cluster_ids)
+            else:
+                self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
 
         # 4. Meteorological-Driven Propagation Module
         # self.wind_propagation = WindPropagationModule(config)
@@ -220,15 +233,11 @@ class PGRT2(nn.Module):
             doy_info = inputs[:, n:n+1, :, :]  # day of year
             doy_feat = self.temporal_encoder(doy_info)  # [B, N, hidden_dim]
 
-        # 3. Physics-informed atmospheric diffusion
-        physics_constraint = self.physics_module(
-            radiation_norm, meteo_data, loc_feature
-        )  # [B, N, hidden_dim]
-
-        # 4. Wind-driven propagation modeling
-        # propagation_feat = self.wind_propagation(
-        #     rad_feat, meteo_data, loc_feature
-        # )  # [B, N, hidden_dim]
+        # 3. Physics-informed atmospheric diffusion (optional)
+        if self.use_physics:
+            physics_constraint = self.physics_module(
+                radiation_norm, meteo_data, loc_feature
+            )  # [B, N, hidden_dim]
 
         # Iteration 2: Rain-aware gating — boost physics/meteo features during humid conditions
         if self.use_rain_gate:
@@ -238,11 +247,14 @@ class PGRT2(nn.Module):
             dryness = air_temp - dew_point                   # [B, N, T]
             rain_gate = self.rain_gate_net(-dryness)          # [B, N, 1], high when humid
             # Boost physics and meteo features during rain events
-            physics_constraint = physics_constraint * (1.0 + rain_gate)
+            if self.use_physics:
+                physics_constraint = physics_constraint * (1.0 + rain_gate)
             meteo_feat = meteo_feat * (1.0 + rain_gate)
 
         # 5. temporal fusion
-        emb = [rad_feat, physics_constraint]
+        emb = [rad_feat]
+        if self.use_physics:
+            emb.append(physics_constraint)
         if self.config['IsLocationEncoder']:
             emb += [loc_feat]
         if self.config['IsLocationInfo']:
@@ -258,8 +270,13 @@ class PGRT2(nn.Module):
 
         # 6. spatial learning
         # Iter5: spatial_swap=True matches NRFormer's Q/K=fused, V=raw pattern
+        # Iter7: spatial_v_source='temporal_mlp' uses temporal_mlp as V (exact NRFormer match)
         if self.spatial_swap:
-            sp_qk, sp_v = x_temporal, rad_feat
+            sp_qk = x_temporal
+            if self.spatial_v_source == 'temporal_mlp' and self.config['IsLocationInfo']:
+                sp_v = temporal_mlp  # NRFormer uses temporal_mlp as V
+            else:
+                sp_v = rad_feat
         else:
             sp_qk, sp_v = rad_feat, x_temporal
 
@@ -618,6 +635,35 @@ class LearnedPositionalEncoding(nn.Embedding):
         weight = self.weight.data.unsqueeze(1)
         x = x + weight[:x.size(0),:]
         return self.dropout(x)
+
+
+class SimpleMeteoEncoder(nn.Module):
+    """NRFormer-style meteorological encoder: flatten all features and use Conv2d pipeline.
+
+    This matches NRFormer's proven meteo processing: 4*T features → 64 → 64 → 32.
+    Much simpler than MeteorologicalEncoder's separate wind/temp pathways.
+    """
+
+    def __init__(self, config, noaa_list):
+        super(SimpleMeteoEncoder, self).__init__()
+        in_length = config.get('in_length', 24)
+        hidden = config['hidden_channels']
+        dim = len(noaa_list) * in_length  # e.g. 4*24=96
+
+        self.meteo_start = nn.Conv2d(in_channels=dim, out_channels=64, kernel_size=(1, 1), bias=True)
+        self.meteo_mlp = nn.Sequential(
+            *[MultiLayerPerceptron(64, 64) for _ in range(2)])
+        self.meteo_end = nn.Conv2d(in_channels=64, out_channels=hidden, kernel_size=(1, 1), bias=True)
+
+    def forward(self, meteo_data):
+        """Args: meteo_data: [B, C, N, T]"""
+        batch_size, num_features, num_nodes, num_steps = meteo_data.shape
+        # Flatten all meteo features x timesteps: [B, C*T, N, 1]
+        combined = meteo_data.transpose(1, 2).reshape(batch_size, num_nodes, -1).transpose(1, 2).unsqueeze(-1)
+        output = self.meteo_start(combined)  # [B, 64, N, 1]
+        output = self.meteo_mlp(output)      # [B, 64, N, 1]
+        output = self.meteo_end(output).squeeze(dim=-1).transpose(1, 2).contiguous()  # [B, N, hidden]
+        return output
 
 
 class MeteorologicalEncoder(nn.Module):
