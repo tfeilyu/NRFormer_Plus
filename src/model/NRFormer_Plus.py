@@ -83,7 +83,8 @@ class PGRT2(nn.Module):
         self.spatial_v_source = config.get('spatial_v_source', 'rad')
 
         # tem_num counts features going into temporal fusion
-        self.tem_num = 2 if self.use_physics else 1  # rad_feat + physics (or just rad_feat)
+        # Always: rad_feat (1) + meteo_feat (1) = 2; optionally + physics (1) = 3
+        self.tem_num = 3 if self.use_physics else 2
 
         # 1. Data Preprocessing Module
         if self.config['use_RevIN']:
