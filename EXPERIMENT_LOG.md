@@ -568,29 +568,34 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 
 | Rank | Exp ID | Config Summary | T-MAE | T-RMSE | 6th | 12th | 24th | Best Ep |
 |------|--------|---------------|-------|--------|-----|------|------|---------|
-| 1 | **i6_r20** | log+cos+rain+2way+swap+r20 | **2.267** | 10.702 | 2.077 | 2.289 | 2.648 | 19 |
-| 2 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 2.056 | 2.326 | 2.710 | 10 |
-| 3 | i1_log | log only | 2.289 | 10.541 | 2.068 | 2.302 | 2.722 | 3 |
-| 4 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 2.069 | 2.341 | 2.683 | 13 |
-| 5 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 2.070 | 2.349 | 2.704 | 10 |
-| 6 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 2.080 | 2.323 | 2.699 | 9 |
-| 7 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 2.091 | 2.335 | 2.725 | 5 |
-| 8 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 2.071 | 2.363 | 2.743 | 10 |
-| 9 | i1_res | residual only | 2.302 | 10.501 | 2.109 | 2.371 | 2.707 | 10 |
-| 10 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 2.083 | 2.382 | 2.723 | 10 |
-| 11 | i1_log_res | log+residual | 2.309 | 10.469 | 2.107 | 2.368 | 2.725 | 10 |
-| 12 | i2_rain | log+rain | 2.310 | 10.729 | 2.083 | 2.366 | 2.721 | 9 |
-| 13 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 2.076 | 2.348 | 2.732 | 9 |
-| 14 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 2.082 | 2.358 | 2.734 | 9 |
-| 15 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 2.083 | 2.370 | 2.685 | 13 |
-| 16 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 2.090 | 2.357 | 2.749 | 9 |
-| 17 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 2.093 | 2.371 | 2.759 | 9 |
-| 18 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 2.107 | 2.379 | 2.734 | 10 |
-| 19 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 2.090 | 2.365 | 2.770 | 9 |
-| 20 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 2.096 | 2.376 | 2.740 | 9 |
-| 21 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
-| 22 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
-| 23 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
+| 1 | **i7_no_physics** | **i6_r20 - physics** | **2.2673** | **10.686** | **2.075** | **2.291** | **2.647** | **19** |
+| 2 | i6_r20 | log+cos+rain+2way+swap+r20 | 2.2674 | 10.702 | 2.077 | 2.289 | 2.648 | 19 |
+| 3 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 2.056 | 2.326 | 2.710 | 10 |
+| 4 | i1_log | log only | 2.289 | 10.541 | 2.068 | 2.302 | 2.722 | 3 |
+| 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 2.069 | 2.341 | 2.683 | 13 |
+| 6 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 2.070 | 2.349 | 2.704 | 10 |
+| 7 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 2.080 | 2.323 | 2.699 | 9 |
+| 8 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 2.091 | 2.335 | 2.725 | 5 |
+| 9 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 2.093 | 2.350 | 2.719 | 9 |
+| 10 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 2.080 | 2.347 | 2.751 | 10 |
+| 11 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 2.071 | 2.363 | 2.743 | 10 |
+| 12 | i1_res | residual only | 2.302 | 10.501 | 2.109 | 2.371 | 2.707 | 10 |
+| 13 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 2.083 | 2.382 | 2.723 | 10 |
+| 14 | i1_log_res | log+residual | 2.309 | 10.469 | 2.107 | 2.368 | 2.725 | 10 |
+| 15 | i2_rain | log+rain | 2.310 | 10.729 | 2.083 | 2.366 | 2.721 | 9 |
+| 16 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 2.076 | 2.348 | 2.732 | 9 |
+| 17 | i7_pure | i7_minimal-rain_gate | 2.310 | 10.734 | 2.077 | 2.372 | 2.700 | 13 |
+| 18 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 2.082 | 2.358 | 2.734 | 9 |
+| 19 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 2.083 | 2.370 | 2.685 | 13 |
+| 20 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 2.090 | 2.357 | 2.749 | 9 |
+| 21 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 2.093 | 2.371 | 2.759 | 9 |
+| 22 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 2.107 | 2.379 | 2.734 | 10 |
+| 23 | i7_v_tmlp | i6_r20+V=temporal_mlp | 2.328 | 10.679 | 2.090 | 2.348 | 2.756 | 12 |
+| 24 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 2.090 | 2.365 | 2.770 | 9 |
+| 25 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 2.096 | 2.376 | 2.740 | 9 |
+| 26 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
+| 27 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
+| 28 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
 
 ---
 
@@ -603,7 +608,11 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 5. **Rain gate 效果微弱** — 数据分析的 F3 (radon washout) 虽然在统计上显著，但对模型的贡献很小
 6. **残差学习不适用于 log-space** — log 空间里的残差语义不同，两者组合反而更差
 7. **训练稳定性很重要** — cosine warmup 让训练从 3 epoch → 13-19 epoch，间接提升了性能
-8. **RegionalCoherenceModule 也不行** — 替换扩散模型为区域同步模型同样更差，问题不在于物理模型的种类，而在于 physics module 本身可能是多余的
+8. **RegionalCoherenceModule 也不行** — 替换扩散模型为区域同步模型同样更差，问题不在于物理模型的种类
+9. **Physics module 可安全移除** — i7_no_physics ≈ i6_r20 (MAE差0.0001)，physics 既不帮忙也不捣乱，模型学会了忽略它
+10. **MeteoEncoder 的分路径设计有价值** — 简化回 NRFormer 风格反而更差 (+1.4%)，wind/temp 分路径+时间卷积是有效的
+11. **Spatial V=rad_feat 优于 V=temporal_mlp** — 在 NRFormer+ 架构下，spatial_swap=True + V=rad_feat 是最优组合
+12. **12-16% gap 不在模型架构层面** — 三个架构假设全部被否定，gap 可能来源于数据处理/评估差异
 
 ---
 
@@ -646,21 +655,54 @@ class SimpleMeteoEncoder:
 
 **Experiments** (base: i6_r20 config + patience=30):
 
-| Exp ID | 改动 | 假设 | T-MAE | T-RMSE | vs i6_r20 |
-|--------|------|------|-------|--------|-----------|
-| i7_no_physics | 去掉 physics module | Physics 注入噪声，是 MAE gap 根因 | - | - | - |
-| i7_v_tmlp | spatial V = temporal_mlp | NRFormer 用更丰富的 V，效果更好 | - | - | - |
-| i7_simple_meteo | 简化 MeteoEncoder | NRFormer 的 96 维 flatten 泛化更好 | - | - | - |
-| i7_minimal | no_physics + v_tmlp + simple_meteo | 最大化对齐 NRFormer | - | - | - |
-| i7_pure | minimal + no rain gate | 去掉所有非必要组件 | - | - | - |
+| Exp ID | 改动 | Best Ep | T-MAE | T-RMSE | Params | vs i6_r20 |
+|--------|------|---------|-------|--------|--------|-----------|
+| (i6_r20) | baseline | 19 | 2.2674 | 10.702 | 349K | — |
+| **i7_no_physics** | **去掉 physics module** | **19** | **2.2673** | **10.686** | **349K** | **-0.004% (持平)** |
+| i7_simple_meteo | 简化 MeteoEncoder | 10 | 2.2999 | 10.749 | 305K | +1.4% (worse) |
+| i7_minimal | no_physics + v_tmlp + simple_meteo | 9 | 2.2989 | 10.614 | 305K | +1.4% (worse) |
+| i7_pure | minimal + no rain gate | 13 | 2.3097 | 10.734 | 304K | +1.9% (worse) |
+| i7_v_tmlp | spatial V = temporal_mlp | 12 | 2.3280 | 10.679 | 349K | +2.7% (worse) |
 
-**Run:**
-```bash
-bash go.sh --iter 7        # sequential on GPU 0
-bash go.sh --iter 7 2      # sequential on GPU 2
-```
+Per-horizon MAE:
+| Horizon | NRFormer | i6_r20 | **i7_no_physics** | i7_v_tmlp | i7_simple_meteo | i7_minimal | i7_pure |
+|---------|----------|--------|-------------------|-----------|-----------------|------------|---------|
+| 6th | 1.84 | 2.077 | **2.075** | 2.090 | 2.080 | 2.093 | 2.077 |
+| 12th | 2.01 | 2.289 | **2.291** | 2.348 | 2.347 | 2.350 | 2.372 |
+| 24th | 2.28 | 2.648 | **2.647** | 2.756 | 2.751 | 2.719 | 2.700 |
 
-**Analysis:** (fill after)
+**Analysis:**
+
+**1. Physics module 既不帮忙也不捣乱:**
+- i7_no_physics (MAE=2.2673) 和 i6_r20 (MAE=2.2674) **几乎完全相同**
+- 去掉 physics module 后参数量不变（因为 temporal fusion 的 input channels 自动减少）
+- **结论**: Physics module 对 MAE 没有贡献，但也没有显著损害。它的输出被模型学习到的 gate 权重有效忽略了
+- 训练稳定性相同 (都是 best_epoch=19)，说明 physics 不是过拟合的原因
+
+**2. 简化 MeteoEncoder 反而更差 (+1.4%):**
+- i7_simple_meteo 用 NRFormer 风格的 96 维 flatten 替代分路径 768 维
+- 但结果更差，说明 MeteorologicalEncoder 的 wind/temp 分路径 + 时间卷积是有价值的
+- **假设被否定**: 复杂的 MeteoEncoder 并非过拟合源，而是有效的特征提取
+
+**3. Spatial V=temporal_mlp 最差 (+2.7%):**
+- i7_v_tmlp 试图匹配 NRFormer 的 V=temporal_mlp 模式
+- 反而是所有实验中最差的，说明 NRFormer+ 的架构下 V=rad_feat 是正确的选择
+- **假设被否定**: spatial V 输入的差异不是 gap 根因
+
+**4. 组合简化没有叠加效果:**
+- i7_minimal (组合三个改动) MAE=2.299，比 i6_r20 差 1.4%
+- i7_pure (去掉 rain gate) 更差 (2.310)，说明 rain gate 虽然弱但有正贡献
+
+**5. 核心发现 — 12-16% gap 不在这三个差异:**
+- 三个假设的根因（physics/spatial_V/meteo）都不是 gap 的来源
+- Physics module 可以安全移除以简化模型（不影响性能，减少复杂度）
+- **真正的 gap 可能在于**: (a) 数据处理/归一化差异 (b) NRFormer 的 3-way 时间嵌入 vs day-of-year (c) 训练配置差异 (d) NRFormer 基线结果可能在不同数据划分上得到
+
+**Decision:**
+- **i7_no_physics ≈ i6_r20** — 可以去掉 physics 简化模型，但不解决 gap
+- 保留当前 MeteoEncoder（被证明有效）
+- 保留 V=rad_feat（被证明比 temporal_mlp 更好）
+- **下一步需要**: 排查 NRFormer 和 NRFormer+ 的数据处理/评估是否完全一致
 
 ---
 
