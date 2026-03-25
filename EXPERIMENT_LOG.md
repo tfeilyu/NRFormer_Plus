@@ -105,9 +105,13 @@ Iteration 7a: Regional Coherence Physics                  ✅ Done (negative res
     Basis: F7 (diffusion model wrong)
     Result: All configs worse than i6_r20 — physics module itself is the problem
 
-Iteration 7b (in progress): Simplification Ablation
+Iteration 7b: Simplification Ablation                     ✅ Done (all 3 hypotheses rejected)
     Basis: NRFormer vs NRFormer+ 逐行对比发现 3 个关键架构差异
-    Experiments: no_physics, v_tmlp, simple_meteo, minimal, pure
+    Result: physics neutral, simple_meteo worse, v_tmlp worse — gap not in architecture
+
+Iteration 8 (in progress): Physics Integration Modes
+    Basis: physics-as-feature 是惰性的，需要更合理的集成方式
+    Experiments: aux_loss(λ=0.01/0.1), residual, light, light_nophys
 ```
 
 ---
@@ -702,7 +706,66 @@ Per-horizon MAE:
 - **i7_no_physics ≈ i6_r20** — 可以去掉 physics 简化模型，但不解决 gap
 - 保留当前 MeteoEncoder（被证明有效）
 - 保留 V=rad_feat（被证明比 temporal_mlp 更好）
-- **下一步需要**: 排查 NRFormer 和 NRFormer+ 的数据处理/评估是否完全一致
+- **下一步需要**: 探索更合理的 physics 集成方式（辅助损失、残差修正、轻量特征注入）
+
+---
+
+### Iteration 8: Physics Integration Modes
+
+**Date:** 2026-03-25
+
+**Data motivation:**
+- Iter 7b 证明 physics-as-feature 是惰性的（去掉持平），说明 temporal fusion 的 Conv2d 学会了忽略 physics 通道
+- 但 physics 知识（dC/dt 时间梯度、区域偏差、气象驱动力）在理论上应该有用
+- 需要找到更有效的 physics 集成方式，让物理知识真正指导模型学习
+
+**三种新方案:**
+
+**方案A: Physics-informed auxiliary loss (physics_mode='aux_loss')**
+- Physics module 不参与 temporal fusion（不加特征）
+- 在 trainer 里加辅助损失: `loss = MAE + λ * MSE(predicted_dCdt, observed_dCdt)`
+- 物理知识通过损失函数间接约束模型，不增加推理复杂度
+```python
+# Model: 返回 (output, aux_loss)
+aux_loss = F.mse_loss(physics_predicted_dcdt, observed_dcdt)
+# Trainer: loss = MAE_loss + λ * aux_loss
+```
+
+**方案B: Physics residual correction (physics_mode='residual')**
+- 主模型正常预测，physics module 做后处理修正
+- 修正幅度由可学习参数 α 控制（初始化 0.1，防止初始扰动过大）
+```python
+correction = physics_correction_head(physics_constraint)  # [B, N, T]
+output = main_output + α * correction
+```
+
+**方案C: Light physics features (physics_mode='light')**
+- 不用完整 physics module，直接计算轻量物理特征
+- dC/dt: 辐射时间梯度（前向差分）
+- regional_deviation: 节点值与邻居均值的偏差
+- 作为额外输入通道注入 temporal self-attention (1 channel → 3 channels)
+```python
+light_input = stack([radiation, dC_dt, regional_dev], dim=1)  # [B, 3, N, T]
+radiation_start = light_physics_proj(light_input)  # [B, H, N, T]
+```
+
+**Experiments** (base: i6_r20 config + patience=30):
+
+| Exp ID | Physics mode | λ | 描述 | T-MAE | T-RMSE | vs i6_r20 |
+|--------|-------------|---|------|-------|--------|-----------|
+| i8_aux_001 | aux_loss | 0.01 | 弱物理约束 | - | - | - |
+| i8_aux_01 | aux_loss | 0.1 | 强物理约束 | - | - | - |
+| i8_residual | residual | — | 输出残差修正 | - | - | - |
+| i8_light | light | — | 轻量物理特征注入 | - | - | - |
+| i8_light_nophys | light + no physics | — | 纯轻量特征，无 module | - | - | - |
+
+**Run:**
+```bash
+bash go.sh --iter 8        # sequential on GPU 0
+bash go.sh --iter 8 2      # sequential on GPU 2
+```
+
+**Analysis:** (fill after)
 
 ---
 

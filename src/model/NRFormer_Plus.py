@@ -82,9 +82,18 @@ class PGRT2(nn.Module):
         # Iteration 7: spatial V source — 'rad' (current) or 'temporal_mlp' (NRFormer-style)
         self.spatial_v_source = config.get('spatial_v_source', 'rad')
 
+        # Iteration 8: physics integration mode
+        # 'feature': original — physics as fusion feature (default)
+        # 'aux_loss': physics module produces aux loss only, not fused into backbone
+        # 'residual': physics module corrects output prediction
+        # 'light': no module — inject dC/dt & regional_deviation as extra input channels
+        self.physics_mode = config.get('physics_mode', 'feature')
+
         # tem_num counts features going into temporal fusion
-        # Always: rad_feat (1) + meteo_feat (1) = 2; optionally + physics (1) = 3
-        self.tem_num = 3 if self.use_physics else 2
+        # Always: rad_feat (1) + meteo_feat (1) = 2
+        # Only 'feature' mode adds physics_constraint to fusion (+1 = 3)
+        physics_in_fusion = self.use_physics and self.physics_mode == 'feature'
+        self.tem_num = 3 if physics_in_fusion else 2
 
         # 1. Data Preprocessing Module
         if self.config['use_RevIN']:
@@ -122,7 +131,7 @@ class PGRT2(nn.Module):
             self.tem_num += 1
 
         # 3. Physics Module (can be disabled with use_physics=False)
-        if self.use_physics:
+        if self.use_physics and self.physics_mode != 'light':
             # Reconstruct [N, N] adjacency from row-wise tensor list
             adj_np = torch.stack(mask_support_adj).detach().cpu().numpy()
             adj_np = (adj_np > 0).astype(float)
@@ -132,6 +141,29 @@ class PGRT2(nn.Module):
                     config, self.noaa_list, adj_matrix=adj_np, cluster_ids=cluster_ids)
             else:
                 self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
+
+        # Iter8 方案B: physics residual correction head
+        if self.use_physics and self.physics_mode == 'residual':
+            self.physics_correction = nn.Sequential(
+                nn.Linear(self.hidden_dim, self.hidden_dim),
+                nn.ReLU(),
+                nn.Linear(self.hidden_dim, self.out_steps),
+            )
+            self.physics_alpha = nn.Parameter(torch.tensor(0.1))  # learnable scaling
+
+        # Iter8 方案C: light physics — extra input channels (dC/dt + regional_dev)
+        if self.physics_mode == 'light':
+            light_extra = 2  # dC/dt, regional_deviation
+            # Projection from (1 + light_extra) input channels to hidden
+            self.light_physics_proj = nn.Conv2d(
+                in_channels=1 + light_extra, out_channels=self.config['hidden_channels'],
+                kernel_size=(1, 1), bias=True)
+            # Precompute row-normalized adjacency for neighbor mean
+            adj_np = torch.stack(mask_support_adj).detach().cpu().numpy()
+            adj_np = (adj_np > 0).astype(float)
+            adj = torch.FloatTensor(adj_np)
+            deg = adj.sum(dim=1, keepdim=True).clamp(min=1.0)
+            self.register_buffer('light_adj_norm', adj / deg)
 
         # 4. Meteorological-Driven Propagation Module
         # self.wind_propagation = WindPropagationModule(config)
@@ -234,27 +266,46 @@ class PGRT2(nn.Module):
             doy_info = inputs[:, n:n+1, :, :]  # day of year
             doy_feat = self.temporal_encoder(doy_info)  # [B, N, hidden_dim]
 
-        # 3. Physics-informed atmospheric diffusion (optional)
-        if self.use_physics:
+        # 3. Physics-informed features (mode-dependent)
+        physics_constraint = None
+        if self.use_physics and self.physics_mode in ('feature', 'aux_loss', 'residual'):
             physics_constraint = self.physics_module(
                 radiation_norm, meteo_data, loc_feature
             )  # [B, N, hidden_dim]
 
+        # Iter8 方案C: light physics — compute dC/dt and regional_deviation directly
+        if self.physics_mode == 'light':
+            # Replace start_time_series input: concat [radiation, dC/dt, regional_dev]
+            rad_seq = radiation_norm[:, 0, :, :]  # [B, N, T]
+            # dC/dt: temporal gradient (forward difference, last step repeated)
+            dC_dt = torch.zeros_like(rad_seq)
+            dC_dt[:, :, :-1] = rad_seq[:, :, 1:] - rad_seq[:, :, :-1]
+            dC_dt[:, :, -1] = dC_dt[:, :, -2]  # repeat last
+            # Regional deviation: node value - neighbor mean
+            rad_last = rad_seq[:, :, -1]  # [B, N]
+            neighbor_mean = torch.matmul(rad_last, self.light_adj_norm.t())  # [B, N]
+            regional_dev = (rad_last - neighbor_mean).unsqueeze(-1).expand_as(rad_seq)  # [B, N, T]
+            # Stack as extra channels: [B, 3, N, T]
+            light_input = torch.stack([rad_seq, dC_dt, regional_dev], dim=1)
+            # Override radiation_start with enriched input
+            radiation_start = self.light_physics_proj(light_input)  # [B, H, N, T]
+            radiation_conv = self.time_series_learning(radiation_start)
+            radiation_conv = radiation_conv.reshape(batch_size, -1, num_nodes, 1)
+            rad_feat = self.end_time_series(radiation_conv).squeeze(dim=-1).transpose(1, 2)
+
         # Iteration 2: Rain-aware gating — boost physics/meteo features during humid conditions
         if self.use_rain_gate:
-            # dryness_index = air_temperature - dew_point (low = humid/rainy)
             air_temp = meteo_data[:, self.temp_idx, :, :]   # [B, N, T]
             dew_point = meteo_data[:, self.dew_idx, :, :]   # [B, N, T]
             dryness = air_temp - dew_point                   # [B, N, T]
             rain_gate = self.rain_gate_net(-dryness)          # [B, N, 1], high when humid
-            # Boost physics and meteo features during rain events
-            if self.use_physics:
+            if physics_constraint is not None and self.physics_mode == 'feature':
                 physics_constraint = physics_constraint * (1.0 + rain_gate)
             meteo_feat = meteo_feat * (1.0 + rain_gate)
 
         # 5. temporal fusion
         emb = [rad_feat]
-        if self.use_physics:
+        if self.use_physics and self.physics_mode == 'feature':
             emb.append(physics_constraint)
         if self.config['IsLocationEncoder']:
             emb += [loc_feat]
@@ -315,10 +366,14 @@ class PGRT2(nn.Module):
         output = self.end_conv2(output)
         output = output.unsqueeze(dim=1)
 
+        # Iter8 方案B: physics residual correction on output
+        if self.use_physics and self.physics_mode == 'residual' and physics_constraint is not None:
+            correction = self.physics_correction(physics_constraint)  # [B, N, out_steps]
+            correction = correction.unsqueeze(1)  # [B, 1, N, out_steps]
+            output = output + self.physics_alpha * correction
+
         # Iteration 1b: Residual prediction — add last known value
         if self.use_residual:
-            # output is predicted delta in normalized space: [B, 1, N, out_steps]
-            # last_value: [B, 1, N, 1] broadcasts across out_steps
             output = last_value + output
 
         # Denormalize
@@ -327,7 +382,22 @@ class PGRT2(nn.Module):
             output = self.revin(output, 'denorm')
         output = output.transpose(1, 2).unsqueeze(1)  # [B, 1, N, T]
 
+        # Iter8 方案A: aux_loss — store physics features for trainer to compute consistency loss
+        aux_loss = None
+        if self.use_physics and self.physics_mode == 'aux_loss' and physics_constraint is not None:
+            # Physics module already computed dC/dt and meteo-driven estimate
+            # Store raw physics diagnostics for trainer
+            rad_seq = radiation_norm[:, 0, :, :]  # [B, N, T]
+            # Temporal gradient: observed dC/dt
+            observed_dcdt = rad_seq[:, :, -1] - rad_seq[:, :, -2]  # [B, N]
+            # Meteo-conditioned prediction of dC/dt
+            meteo_avg = meteo_data.mean(dim=-1).transpose(1, 2) if meteo_data is not None else torch.zeros(batch_size, num_nodes, 1, device=output.device)
+            predicted_dcdt = physics_constraint.mean(dim=-1)  # [B, N] — use physics output as proxy
+            aux_loss = F.mse_loss(predicted_dcdt, observed_dcdt)
+
         # Note: if use_log_space=True, inverse log transform (expm1) is applied in trainer
+        if aux_loss is not None:
+            return output, aux_loss
         return output
 
 

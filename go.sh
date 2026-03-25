@@ -30,6 +30,55 @@ finish() {
 }
 
 # ============================================================
+# Iteration 8: Physics Integration Modes
+#   Iter 7b showed physics-as-feature is inert (去掉持平).
+#   Try 3 better ways to inject physics knowledge:
+#   A. aux_loss: physics consistency loss (不改backbone, 加辅助损失)
+#   B. residual: physics module corrects output (后处理修正)
+#   C. light: inject dC/dt & regional_deviation as input channels (轻量特征)
+#   Base: i6_r20 config (best overall)
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "8" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+ARCH="--fusion_type 2way --spatial_swap True"
+REGION="--num_region_clusters 20"
+PATIENCE="--early_stop_steps 30"
+
+GPU=${3:-"0"}
+echo "===== Iteration 8: Physics Integration Modes (sequential on GPU $GPU) ====="
+
+# Exp 1: aux_loss with λ=0.01
+echo "[1/5] i8_aux_001"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i8_aux_001 --physics_mode aux_loss --physics_lambda 0.01
+
+# Exp 2: aux_loss with λ=0.1
+echo "[2/5] i8_aux_01"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i8_aux_01 --physics_mode aux_loss --physics_lambda 0.1
+
+# Exp 3: residual correction
+echo "[3/5] i8_residual"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i8_residual --physics_mode residual
+
+# Exp 4: light physics features (dC/dt + regional deviation as input)
+echo "[4/5] i8_light"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i8_light --physics_mode light
+
+# Exp 5: light + no full physics module (cleanest version)
+echo "[5/5] i8_light_nophys"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION $PATIENCE \
+    --model_des i8_light_nophys --physics_mode light --use_physics False
+
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 7: Simplification & Root Cause Ablation
 #   i6_r20 is best (MAE=2.267) but still 12-16% behind NRFormer.
 #   Root cause analysis identified 3 key differences from NRFormer:

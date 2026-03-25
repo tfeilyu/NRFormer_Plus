@@ -19,6 +19,10 @@ class Trainer():
 
         self.loss = utils.masked_mae
 
+        # Iter8: physics auxiliary loss weight
+        self.physics_lambda = float(config.get('physics_lambda', 0.0))
+        self.physics_mode = config.get('physics_mode', 'feature')
+
         # Iter5: horizon-dependent loss weighting
         hw_strategy = config.get('horizon_weight', 'none')
         if hw_strategy != 'none':
@@ -84,7 +88,14 @@ class Trainer():
         self.weight_optimizer.zero_grad()
         self.model.train()
 
-        output = self.model(inputs, loc_feature)
+        model_output = self.model(inputs, loc_feature)
+
+        # Iter8: handle aux_loss return from model (physics_mode='aux_loss')
+        aux_loss = None
+        if isinstance(model_output, tuple):
+            output, aux_loss = model_output
+        else:
+            output = model_output
 
         real = torch.unsqueeze(real_val, dim=1)
         predict = self._to_original_space(output)
@@ -97,6 +108,11 @@ class Trainer():
             loss = torch.mean(torch.abs(predict - real) * mask * hw)
         else:
             loss = self.loss(predict, real, 0.0)
+
+        # Iter8: add physics auxiliary loss
+        if aux_loss is not None and self.physics_lambda > 0:
+            loss = loss + self.physics_lambda * aux_loss
+
         loss.backward(retain_graph=False)
 
         mae = utils.masked_mae(predict, real, 0.0).item()
@@ -122,7 +138,12 @@ class Trainer():
     def eval(self, inputs, loc_feature, real_val):
         self.model.eval()
         with torch.no_grad():
-            output = self.model(inputs, loc_feature)
+            model_output = self.model(inputs, loc_feature)
+        # Handle aux_loss return
+        if isinstance(model_output, tuple):
+            output = model_output[0]
+        else:
+            output = model_output
         real = torch.unsqueeze(real_val, dim=1)
         predict = self._to_original_space(output)
 
