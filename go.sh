@@ -30,6 +30,40 @@ finish() {
 }
 
 # ============================================================
+# Iteration 6: Region-aware Attention Bias (Data-Driven Iter 4)
+#   Basis: Within-prefecture r=0.473, 3.45x between-prefecture
+#   Prefecture-level spatial clustering as attention bias
+#   Build on best: i5_full (log + cosine + rain + 2way + swap)
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "6" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+ARCH="--fusion_type 2way --spatial_swap True"
+
+GPU=${3:-"0"}
+echo "===== Iteration 6: Region-aware Attention (sequential on GPU $GPU) ====="
+
+# Exp 1: 10 clusters (coarse regional grouping)
+echo "[1/3] i6_r10"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
+    --model_des i6_r10 --num_region_clusters 10
+
+# Exp 2: 15 clusters (prefecture-scale)
+echo "[2/3] i6_r15"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
+    --model_des i6_r15 --num_region_clusters 15
+
+# Exp 3: 20 clusters (fine-grained)
+echo "[3/3] i6_r20"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
+    --model_des i6_r20 --num_region_clusters 20
+
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 5: Architectural Alignment with NRFormer
 #   Root cause: NRFormer+ deviates from NRFormer's proven design
 #   in ways that HURT performance. Fix the damage first.

@@ -21,7 +21,7 @@ class PGRT2(nn.Module):
     4. Adaptive spatial attention based on monitoring station density
     """
 
-    def __init__(self, config,mask_support_adj):
+    def __init__(self, config, mask_support_adj, cluster_ids=None):
         super(PGRT2, self).__init__()
 
         self.config = config
@@ -49,6 +49,15 @@ class PGRT2(nn.Module):
         if self.num_global_nodes > 0:
             self.global_tokens = nn.Parameter(torch.randn(1, self.num_global_nodes, self.hidden_dim) * 0.02)
             self.global_tokens_v = nn.Parameter(torch.randn(1, self.num_global_nodes, self.hidden_dim) * 0.02)
+
+        # Iteration 4: Region-aware attention bias
+        self.num_region_clusters = config.get('num_region_clusters', 0)
+        if self.num_region_clusters > 0 and cluster_ids is not None:
+            self.register_buffer('cluster_ids', torch.tensor(cluster_ids, dtype=torch.long))
+            self.region_embed = nn.Embedding(self.num_region_clusters, self.hidden_dim)
+            nn.init.normal_(self.region_embed.weight, std=0.02)
+        else:
+            self.num_region_clusters = 0
 
         # Iteration 2: rain-aware gating
         self.use_rain_gate = config.get('use_rain_gate', False)
@@ -99,11 +108,16 @@ class PGRT2(nn.Module):
             self.temporal_encoder = TemporalEncoder(config)
             self.tem_num += 1
 
-        # 3. Physics-Informed Atmospheric Diffusion Module
-        # Reconstruct full adjacency matrix from mask_support_adj (list of row tensors)
-        adj_full = torch.stack(list(mask_support_adj)).detach().cpu().numpy()
-        adj_full = (adj_full > 0).astype(float)
-        self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_full)
+        # 3. Physics Module
+        # Construct proper [N, N] adjacency from transition matrices
+        adj_np = (mask_support_adj[0].detach().cpu().numpy() + mask_support_adj[1].detach().cpu().numpy())
+        adj_np = (adj_np > 0).astype(float)
+        self.physics_type = config.get('physics_type', 'diffusion')
+        if self.physics_type == 'regional':
+            # Iter6: RegionalCoherenceModule — data says no diffusion (F7)
+            self.physics_module = RegionalCoherenceModule(config, self.noaa_list, adj_matrix=adj_np)
+        else:
+            self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
 
         # 4. Meteorological-Driven Propagation Module
         # self.wind_propagation = WindPropagationModule(config)
@@ -248,6 +262,12 @@ class PGRT2(nn.Module):
             sp_qk, sp_v = x_temporal, rad_feat
         else:
             sp_qk, sp_v = rad_feat, x_temporal
+
+        # Iteration 4: Add region-aware bias to spatial Q/K and V
+        if self.num_region_clusters > 0:
+            region_bias = self.region_embed(self.cluster_ids)  # [N, hidden_dim]
+            sp_qk = sp_qk + region_bias.unsqueeze(0)  # [B, N, H] + [1, N, H]
+            sp_v = sp_v + region_bias.unsqueeze(0)
 
         if self.num_global_nodes > 0:
             K = self.num_global_nodes

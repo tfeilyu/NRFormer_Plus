@@ -32,6 +32,16 @@ class RadiationDataProcessing:
         self.loc_ft = self.read_loc()
         self.dataloader['loc_feature'] = self.loc_ft
 
+        # Iteration 4: Region-aware clustering on station locations
+        num_clusters = self.config.get('num_region_clusters', 0)
+        if num_clusters > 0:
+            from sklearn.cluster import KMeans
+            kmeans = KMeans(n_clusters=num_clusters, random_state=self.config.get('seed', 2025), n_init=10)
+            self.cluster_ids = kmeans.fit_predict(self.loc_ft)  # [N,]
+        else:
+            self.cluster_ids = None
+        self.dataloader['cluster_ids'] = self.cluster_ids
+
         self.build_data_loader()
 
     def read_loc(self):

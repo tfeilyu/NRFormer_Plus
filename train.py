@@ -59,6 +59,7 @@ parser.add_argument('--num_global_nodes', type=int, default=0, help='Iter3: virt
 parser.add_argument('--fusion_type', type=str, default='3way', help='Iter5: 2way or 3way fusion')
 parser.add_argument('--spatial_swap', type=bool, default=False, help='Iter5: swap spatial Q/K and V')
 parser.add_argument('--horizon_weight', type=str, default='none', help='Iter5: none/linear/inverse_acf')
+parser.add_argument('--num_region_clusters', type=int, default=0, help='Iter4: region-aware attention (0=disabled, 15-20 recommended)')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')
@@ -105,7 +106,8 @@ def main():
     if args.model_name == 'NRFormer':
         model = NRFormer(all_args, mask_support_adj)
     elif args.model_name == 'NRFormer_Plus':
-        model = PGRT2(all_args, mask_support_adj)
+        cluster_ids = dataloader.get('cluster_ids', None)
+        model = PGRT2(all_args, mask_support_adj, cluster_ids=cluster_ids)
 
     num_Params = sum([p.nelement() for p in model.parameters()])
     print('Number of model parameters is', num_Params)
