@@ -109,8 +109,8 @@ class PGRT2(nn.Module):
             self.tem_num += 1
 
         # 3. Physics Module
-        # Construct proper [N, N] adjacency from transition matrices
-        adj_np = (mask_support_adj[0].detach().cpu().numpy() + mask_support_adj[1].detach().cpu().numpy())
+        # Reconstruct [N, N] adjacency from row-wise tensor list
+        adj_np = torch.stack(mask_support_adj).detach().cpu().numpy()
         adj_np = (adj_np > 0).astype(float)
         self.physics_type = config.get('physics_type', 'diffusion')
         if self.physics_type == 'regional':
