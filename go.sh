@@ -30,6 +30,41 @@ finish() {
 }
 
 # ============================================================
+# Iteration 7: Regional Coherence Physics + Region Attention
+#   Replace wrong Laplacian diffusion with synchronous response model.
+#   Data: no propagation (9.5% sync), lag-0 dominance, D=5814 unrealistic.
+#   Build on best: i6_r20 (region clusters=20 + all previous best)
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "7" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+ARCH="--fusion_type 2way --spatial_swap True"
+REGION="--num_region_clusters 20"
+
+GPU=${3:-"0"}
+echo "===== Iteration 7: Regional Coherence Physics (sequential on GPU $GPU) ====="
+
+# Exp 1: regional physics + r20 (replace diffusion, keep everything else)
+echo "[1/3] i7_regional"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i7_regional --physics_type regional
+
+# Exp 2: regional physics + r25 (try finer clustering)
+echo "[2/3] i7_r25"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
+    --model_des i7_r25 --physics_type regional --num_region_clusters 25
+
+# Exp 3: diffusion physics + r25 (control: more clusters with old physics)
+echo "[3/3] i7_r25_diff"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH \
+    --model_des i7_r25_diff --num_region_clusters 25
+
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 6: Region-aware Attention Bias (Data-Driven Iter 4)
 #   Basis: Within-prefecture r=0.473, 3.45x between-prefecture
 #   Prefecture-level spatial clustering as attention bias

@@ -114,8 +114,8 @@ class PGRT2(nn.Module):
         adj_np = (adj_np > 0).astype(float)
         self.physics_type = config.get('physics_type', 'diffusion')
         if self.physics_type == 'regional':
-            # Iter6: RegionalCoherenceModule — data says no diffusion (F7)
-            self.physics_module = RegionalCoherenceModule(config, self.noaa_list, adj_matrix=adj_np)
+            self.physics_module = RegionalCoherenceModule(
+                config, self.noaa_list, adj_matrix=adj_np, cluster_ids=cluster_ids)
         else:
             self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
 
@@ -903,6 +903,142 @@ class AtmosphericDiffusionModule(nn.Module):
             mean_val = values.mean(dim=1, keepdim=True)
             laplacian = values - mean_val
         return laplacian
+
+
+class RegionalCoherenceModule(nn.Module):
+    """Regional synchronous response model replacing Laplacian diffusion.
+
+    Data analysis shows radiation changes do NOT propagate station-to-station
+    (only 9.5% neighbor sync within ±2 days, lag-0 dominance). Instead, changes
+    appear simultaneously across large regions driven by weather events.
+
+    This module models:
+    1. Regional mean and per-station deviation (coherence constraint)
+    2. Weather forcing per region (rain/humidity drives synchronous spikes)
+    3. Temporal dynamics (dC/dt) relative to regional behavior
+    """
+
+    def __init__(self, config, noaa_list, adj_matrix=None, cluster_ids=None):
+        super(RegionalCoherenceModule, self).__init__()
+        self.hidden_dim = config['hidden_channels']
+        self.num_clusters = config.get('num_region_clusters', 20)
+        n_meteo = len(noaa_list)
+        in_steps = config.get('in_length', 24)
+
+        if cluster_ids is not None:
+            self.register_buffer('cluster_ids', torch.tensor(cluster_ids, dtype=torch.long))
+        else:
+            self.cluster_ids = None
+
+        # Weather forcing network: per-region forcing from meteo features
+        # Input: [B, K, n_meteo] (region-averaged meteo) -> [B, K, hidden]
+        self.weather_net = nn.Sequential(
+            nn.Linear(n_meteo, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.hidden_dim),
+        )
+
+        # Deviation encoder: how much a station deviates from its regional mean
+        # Input: [B, N, 3] (current_val, regional_mean, deviation) -> [B, N, hidden]
+        self.deviation_net = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.hidden_dim),
+        )
+
+        # Temporal trend encoder: captures dC/dt from input sequence
+        self.temporal_net = nn.Sequential(
+            nn.Linear(in_steps, 32),
+            nn.ReLU(),
+            nn.Linear(32, self.hidden_dim),
+        )
+
+        # Fusion: combine weather forcing + deviation + temporal -> hidden
+        self.fusion = nn.Sequential(
+            nn.Linear(self.hidden_dim * 3, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+        )
+
+    def _scatter_mean(self, x, cluster_ids, num_clusters):
+        """Manual scatter_mean without torch_scatter dependency.
+        Args:
+            x: [B, N] values
+            cluster_ids: [N] cluster assignments
+        Returns:
+            means: [B, K] per-cluster means
+        """
+        B, N = x.shape
+        K = num_clusters
+        # One-hot: [N, K]
+        one_hot = torch.zeros(N, K, device=x.device)
+        one_hot.scatter_(1, cluster_ids.unsqueeze(1), 1.0)
+        counts = one_hot.sum(dim=0).clamp(min=1.0)  # [K]
+        # Sum per cluster: [B, N] @ [N, K] -> [B, K]
+        cluster_sum = torch.matmul(x, one_hot)
+        return cluster_sum / counts.unsqueeze(0)  # [B, K]
+
+    def forward(self, radiation_data, meteo_data, loc_feature):
+        """
+        Args:
+            radiation_data: [B, 1, N, T]
+            meteo_data: [B, C_m, N, T]
+            loc_feature: [N, 2]
+        Returns:
+            physics_out: [B, N, hidden_dim]
+        """
+        batch_size, _, num_nodes, num_steps = radiation_data.shape
+        device = radiation_data.device
+
+        # If no cluster_ids, fall back to global mean
+        if self.cluster_ids is None:
+            cluster_ids = torch.zeros(num_nodes, dtype=torch.long, device=device)
+            K = 1
+        else:
+            cluster_ids = self.cluster_ids.to(device)
+            K = self.num_clusters
+
+        # 1. Regional coherence: compute regional means and deviations
+        rad_current = radiation_data[:, 0, :, -1]  # [B, N]
+        regional_mean = self._scatter_mean(rad_current, cluster_ids, K)  # [B, K]
+        station_regional_mean = regional_mean[:, cluster_ids]  # [B, N]
+        deviation = rad_current - station_regional_mean  # [B, N]
+
+        dev_features = torch.stack([
+            rad_current, station_regional_mean, deviation
+        ], dim=-1)  # [B, N, 3]
+        dev_out = self.deviation_net(dev_features)  # [B, N, hidden]
+
+        # 2. Weather forcing per region
+        meteo_avg = meteo_data.mean(dim=-1)  # [B, C_m, N] time-averaged
+        meteo_avg = meteo_avg.transpose(1, 2)  # [B, N, C_m]
+        # Average meteo within each region
+        region_meteo_list = []
+        for c in range(meteo_avg.shape[-1]):
+            rm = self._scatter_mean(meteo_avg[:, :, c], cluster_ids, K)  # [B, K]
+            region_meteo_list.append(rm)
+        region_meteo = torch.stack(region_meteo_list, dim=-1)  # [B, K, C_m]
+        weather_forcing = self.weather_net(region_meteo)  # [B, K, hidden]
+        # Broadcast to per-station: [B, N, hidden]
+        station_weather = weather_forcing[:, cluster_ids, :]
+
+        # 3. Temporal dynamics: dC/dt approximation
+        rad_sequence = radiation_data[:, 0, :, :]  # [B, N, T]
+        temporal_out = self.temporal_net(rad_sequence)  # [B, N, hidden]
+
+        # 4. Fuse all physics-informed features
+        combined = torch.cat([dev_out, station_weather, temporal_out], dim=-1)
+        physics_out = self.fusion(combined)  # [B, N, hidden]
+
+        # Store diagnostics
+        self._last_diagnostics = {
+            'deviation_abs_mean': deviation.abs().mean().item(),
+            'deviation_std': deviation.std().item(),
+            'regional_mean_std': regional_mean.std().item(),
+            'weather_forcing_norm': weather_forcing.norm(dim=-1).mean().item(),
+        }
+
+        return physics_out
 
 
 class WindPropagationModule(nn.Module):
