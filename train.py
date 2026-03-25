@@ -344,9 +344,9 @@ def main():
         valid_y = valid_y.transpose(1, 3)[:, 0, :, :]
 
         with torch.no_grad():
-            # input (64, 2, 207, 12)
             preds = engine.model(valid_x, sensors_location)
-            # output (64, 1, 207, 12)
+            if isinstance(preds, tuple):
+                preds = preds[0]
 
         outputs.append(preds.squeeze(dim=1))
         true_valid_y.append(valid_y)
@@ -372,9 +372,9 @@ def main():
         test_y = test_y.transpose(1, 3)[:, 0, :, :]
 
         with torch.no_grad():
-            # input (64, 2, 207, 12)
             preds = engine.model(test_x, sensors_location)
-            # output (64, 1, 207, 12)
+            if isinstance(preds, tuple):
+                preds = preds[0]
 
         outputs.append(preds.squeeze(dim=1))
         true_test_y.append(test_y)

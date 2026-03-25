@@ -70,6 +70,8 @@ def predict_model(tag):
         x = x.transpose(1, 3)
         with torch.no_grad():
             prediction = engine.model(x, dataloader['loc_feature'])
+            if isinstance(prediction, tuple):
+                prediction = prediction[0]
         outputs.append(prediction.squeeze(dim=1))
     yhat = torch.cat(outputs, dim=0)
     yhat = yhat[:true_y.size(0), ...]
@@ -218,8 +220,8 @@ if __name__ == "__main__":
                 # test_x = test_x.squeeze(dim=1)
                 # test_x = test_x.transpose(1, 2)
                 preds = engine.model(test_x, dataloader['loc_feature'])
-                # preds = preds.transpose(1, 2)
-                # output (64, 1, 207, 12)
+                if isinstance(preds, tuple):
+                    preds = preds[0]
 
             outputs.append(preds.squeeze(dim=1))
             true_test_y.append(test_y)
