@@ -92,89 +92,104 @@ exit 0
 fi
 
 # ============================================================
-# Phase 2: Architecture (hidden_dim, layers, end_channels, dropout)
-#   Use best training params from Phase 1 (or default)
+# Phase 2: Architecture Search (on residual mode + LR=0.0003)
+#   Phase 1 best: LR=0.0003, best_ep=32, avg6=1.808, avg12=2.011
+#   Now search architecture params with this optimal LR
 # ============================================================
 if [ "$1" == "--phase" ] && [ "$2" == "2" ]; then
 GPU=${3:-"0"}
 
-# ── Plug in best training params from Phase 1 here ──
-TRAIN="--weight_lr 0.001 --warmup_epochs 5 --batch_size 8"
+# ── Best training params from Phase 1: LR=0.0003 ──
+TRAIN="--weight_lr 0.0003 --warmup_epochs 5 --batch_size 8"
 TRAIN="$TRAIN --temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
 
-echo "===== Phase 2: Architecture (GPU $GPU) ====="
+echo "===== Phase 2: Architecture on residual+lr3e4 (GPU $GPU) ====="
 
-# Exp 1: hidden=48 (50% larger)
-echo "[1/6] hp_h48"
+# Exp 1: hidden=48
+echo "[1/6] hp2_h48"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_h48 --hidden_channels 48
+    --model_des hp2_h48 --hidden_channels 48
 
-# Exp 2: hidden=64
-echo "[2/6] hp_h64"
+# Exp 2: 4 temporal layers
+echo "[2/6] hp2_tl4"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_h64 --hidden_channels 64
+    --model_des hp2_tl4 --num_temporal_att_layer 4
 
-# Exp 3: 4 temporal layers (deeper)
-echo "[3/6] hp_tl4"
+# Exp 3: 3 spatial layers
+echo "[3/6] hp2_sl3"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_tl4 --num_temporal_att_layer 4
+    --model_des hp2_sl3 --num_spatial_att_layer 3
 
-# Exp 4: 3 spatial layers (deeper)
-echo "[4/6] hp_sl3"
+# Exp 4: end_channels=256 (smaller projection)
+echo "[4/6] hp2_ec256"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_sl3 --num_spatial_att_layer 3
+    --model_des hp2_ec256 --end_channels 256
 
-# Exp 5: end_channels=256 (smaller projection)
-echo "[5/6] hp_ec256"
+# Exp 5: dropout=0.2
+echo "[5/6] hp2_drop02"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_ec256 --end_channels 256
+    --model_des hp2_drop02 --temporal_dropout 0.2
 
-# Exp 6: dropout=0.2 (less regularization)
-echo "[6/6] hp_drop02"
+# Exp 6: ffn_ratio=2 (moderate FFN expansion)
+echo "[6/6] hp2_ffn2"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_drop02 --temporal_dropout 0.2
+    --model_des hp2_ffn2 --ffn_ratio 2
 
 finish
 exit 0
 fi
 
 # ============================================================
-# Phase 3: Physics & Regularization tuning
-#   Fine-tune the residual correction and region clusters
+# Phase 3: Feature mode (i6_r20) LR search + cross-mode comparison
+#   Key question: is hp_lr3e4's improvement from LR or from residual+LR?
+#   Also fine-tune region clusters and other components
 # ============================================================
 if [ "$1" == "--phase" ] && [ "$2" == "3" ]; then
 GPU=${3:-"0"}
 
-# ── Use best training + architecture from Phase 1+2 ──
-TRAIN="--weight_lr 0.001 --warmup_epochs 5 --batch_size 8"
-TRAIN="$TRAIN --temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+TRAIN="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
 
-echo "===== Phase 3: Physics & Regularization (GPU $GPU) ====="
+echo "===== Phase 3: Feature mode tuning + cross-mode comparison (GPU $GPU) ====="
 
-# Exp 1: More region clusters (25)
-echo "[1/5] hp_r25"
+# ── A. i6_r20 (feature mode) with different LRs ──
+# Control: is LR=0.0003 universally better, or only for residual?
+
+echo "[1/7] hp3_feat_lr3e4 (i6_r20 + LR=0.0003)"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_r25 --num_region_clusters 25
+    --model_des hp3_feat_lr3e4 --physics_mode feature --weight_lr 0.0003 \
+    --warmup_epochs 5 --batch_size 8
 
-# Exp 2: More region clusters (30)
-echo "[2/5] hp_r30"
+echo "[2/7] hp3_feat_lr5e4 (i6_r20 + LR=0.0005)"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_r30 --num_region_clusters 30
+    --model_des hp3_feat_lr5e4 --physics_mode feature --weight_lr 0.0005 \
+    --warmup_epochs 5 --batch_size 8
 
-# Exp 3: Residual + horizon weighting (inverse_acf)
-echo "[3/5] hp_hw_acf"
+echo "[3/7] hp3_feat_lr1e3 (i6_r20 + LR=0.001, original)"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_hw_acf --horizon_weight inverse_acf
+    --model_des hp3_feat_lr1e3 --physics_mode feature --weight_lr 0.001 \
+    --warmup_epochs 5 --batch_size 8
 
-# Exp 4: Residual + no wind features (F8: wind is useless)
-echo "[4/5] hp_nowind"
-CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_nowind --Is_wind_angle False --Is_wind_speed False
+# ── B. Fine-tuning on best residual config (LR=0.0003) ──
 
-# Exp 5: Residual + feature mode (compare: is residual actually better with best params?)
-echo "[5/5] hp_feature"
+echo "[4/7] hp3_r25 (residual + 25 clusters)"
 CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
-    --model_des hp_feature --physics_mode feature
+    --model_des hp3_r25 --weight_lr 0.0003 --warmup_epochs 5 --batch_size 8 \
+    --num_region_clusters 25
+
+echo "[5/7] hp3_r30 (residual + 30 clusters)"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
+    --model_des hp3_r30 --weight_lr 0.0003 --warmup_epochs 5 --batch_size 8 \
+    --num_region_clusters 30
+
+echo "[6/7] hp3_nowind (residual + no wind)"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
+    --model_des hp3_nowind --weight_lr 0.0003 --warmup_epochs 5 --batch_size 8 \
+    --Is_wind_angle False --Is_wind_speed False
+
+echo "[7/7] hp3_nophys (no physics + LR=0.0003, cleanest baseline)"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $BASE $TRAIN \
+    --model_des hp3_nophys --physics_mode feature --use_physics False \
+    --weight_lr 0.0003 --warmup_epochs 5 --batch_size 8
 
 finish
 exit 0
