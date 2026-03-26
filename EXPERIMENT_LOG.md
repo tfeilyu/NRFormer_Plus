@@ -112,6 +112,12 @@ Iteration 7b: Simplification Ablation                     ✅ Done (all 3 hypoth
 Iteration 8: Physics Integration Modes                     ✅ Done (all 3 modes worse)
     Basis: physics-as-feature 是惰性的，需要更合理的集成方式
     Result: residual +1.3%, light +6.2%, aux_loss +6.6% — physics无论如何集成都无法改善MAE
+
+Iteration 9 (in progress): Hyperparameter Search on residual mode
+    Basis: residual 是最优 physics 集成方式(+1.3%)，通过搜参可能反超 i6_r20
+    Phase 1: 训练参数 (LR, warmup, batch_size) — 6 experiments
+    Phase 2: 架构参数 (hidden, layers, dropout) — 6 experiments
+    Phase 3: Physics & 正则化 (clusters, horizon_weight, wind) — 5 experiments
 ```
 
 ---
