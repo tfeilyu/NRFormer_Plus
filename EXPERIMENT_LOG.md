@@ -118,11 +118,18 @@ Iteration 8: Physics Integration Modes                     ✅ Done (all 3 modes
     Basis: physics-as-feature 是惰性的，需要更合理的集成方式
     Result: residual +1.3%, light +6.2%, aux_loss +6.6% — physics无论如何集成都无法改善MAE
 
-Iteration 9 (in progress): Hyperparameter Search on residual mode
-    Basis: residual 是最优 physics 集成方式(+1.3%)，通过搜参可能反超 i6_r20
-    Phase 1: 训练参数 (LR, warmup, batch_size) — 6 experiments
-    Phase 2: 架构参数 (hidden, layers, dropout) — 6 experiments
-    Phase 3: Physics & 正则化 (clusters, horizon_weight, wind) — 5 experiments
+Iteration 9: Patience + Horizon-adaptive Physics            ✅ Done (both ineffective)
+    Basis: patience 让模型训练更久, hadapt 让短期修正强/长期弱
+    Result: patience 无效(还是ep19), hadapt +6-8% 严重退步
+
+Hypersearch Phase 1-2: Residual mode 超参搜索              ✅ Partial
+    Phase 1: LR=0.0003 大幅提升 → hp_lr3e4 (avg12≈NRFormer, RMSE -10.2%)
+    Phase 2: 更大/更深架构反而更差, hidden=32 TL=3 就是最优
+    Phase 3: 待完成 (feature mode 对照 + 组件微调)
+
+i6_r20 全面搜参 (search_i6r20.sh): 准备中
+    自动链式搜索: Phase 1→2→3→4, 每阶段自动选取最优参数
+    Total: 24 experiments
 ```
 
 ---
@@ -582,18 +589,25 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 |------|--------|---------------|-----------|-----------|------|-------|---------|
 | 1 | **i7_no_physics** | i6_r20 - physics | **2.267** | **10.686** | 1.831 | 2.026 | 19 |
 | 2 | **i6_r20** | log+cos+rain+2way+swap+r20 | **2.267** | **10.702** | 1.835 | 2.028 | 19 |
-| 3 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 1.827 | 2.032 | 10 |
+| 3 | i9_p50 | i6_r20 + patience=50 | 2.267 | 10.702 | 1.834 | 2.026 | 19 |
+| 4 | i9_p30 | i6_r20 + patience=30 | 2.274 | 10.697 | 1.839 | 2.031 | 19 |
+| 5 | **hp_lr3e4** | **residual+LR=3e-4** | **2.276** | **10.462** | **1.808** | **2.011** | **32** |
+| 6 | hp_lr5e4 | residual+LR=5e-4 | 2.289 | 10.582 | 1.826 | 2.027 | 25 |
+| 7 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 1.827 | 2.032 | 10 |
 | 4 | i1_log | log only | 2.289 | 10.541 | 1.854 | 2.035 | 3 |
 | 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 1.819 | 2.033 | 13 |
-| 6 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 1.824 | 2.039 | 10 |
-| 7 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 1.833 | 2.037 | 9 |
-| 8 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 1.845 | 2.046 | 5 |
-| 9 | i8_residual | physics residual correction | 2.297 | 10.673 | **1.810** | 2.030 | 14 |
-| 10 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 1.825 | 2.034 | 9 |
-| 11 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 1.824 | 2.037 | 10 |
-| 12 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 1.826 | 2.044 | 10 |
-| 13 | i1_res | residual only | 2.302 | 10.501 | 1.839 | 2.059 | 10 |
-| 14 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 1.823 | 2.050 | 10 |
+| 10 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 1.824 | 2.039 | 10 |
+| 11 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 1.833 | 2.037 | 9 |
+| 12 | hp2_h48 | residual+lr3e4+hidden=48 | 2.294 | 10.701 | 1.825 | 2.028 | 22 |
+| 13 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 1.845 | 2.046 | 5 |
+| 14 | i8_residual | physics residual correction | 2.297 | 10.673 | **1.810** | 2.030 | 14 |
+| 15 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 1.825 | 2.034 | 9 |
+| 16 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 1.824 | 2.037 | 10 |
+| 17 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 1.826 | 2.044 | 10 |
+| 18 | i1_res | residual only | 2.302 | 10.501 | 1.839 | 2.059 | 10 |
+| 19 | hp_warm10 | residual+warmup=10 | 2.305 | 10.612 | 1.815 | 2.038 | 14 |
+| 20 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 1.823 | 2.050 | 10 |
+| 21 | hp2_tl4 | residual+lr3e4+TL=4 | 2.309 | 10.520 | 1.872 | 2.062 | 9 |
 | 15 | i1_log_res | log+residual | 2.309 | 10.469 | 1.835 | 2.058 | 10 |
 | 16 | i2_rain | log+rain | 2.310 | 10.729 | 1.841 | 2.051 | 9 |
 | 17 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 1.833 | 2.042 | 9 |
@@ -611,8 +625,11 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 | 29 | i2_cosine | log+cosine | 2.343 | 10.707 | 1.842 | 2.062 | 9 |
 | 30 | i8_light | light physics features | 2.407 | 11.447 | 2.087 | 2.212 | 6 |
 | 31 | i8_light_nophys | light + no module | 2.408 | 11.454 | 2.089 | 2.213 | 6 |
-| 32 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.114 | 2.229 | 6 |
-| 33 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.115 | 2.230 | 6 |
+| 32 | i9_hadapt_p50 | horizon-adaptive + p50 | 2.409 | 11.409 | 2.107 | 2.223 | 6 |
+| 33 | i9_hadapt | horizon-adaptive physics | 2.413 | 11.338 | 2.110 | 2.227 | 6 |
+| 34 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.114 | 2.229 | 6 |
+| 35 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.115 | 2.230 | 6 |
+| 36 | i9_hadapt_lr5e4 | hadapt + LR=0.0005 | 2.447 | 12.214 | 2.094 | 2.259 | 25 |
 
 ---
 
@@ -636,6 +653,10 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 11. **Physics 的 aux_loss/residual/light 集成方式都不如 feature 模式** — feature 模式虽中性但至少无害
 12. **改变输入通道数很危险** — light 模式 (1ch→3ch) 导致 +6% 退步
 13. **⚠️ 指标对比必须统一** — single-step MAE 和 average-step MAE 差异巨大(~12%)，对比时必须确认使用同一指标
+14. **LR=0.0003 是关键发现** — hp_lr3e4 (residual+LR=3e-4) 训练到 ep32 (vs ep14/19)，avg12 几乎追平 NRFormer，RMSE -10.2%
+15. **Patience 增大无效** — 模型在 LR=0.001 下始终在 ep19 收敛，patience=30/50 不改变此事实
+16. **Horizon-adaptive physics 严重失败** — per-step gate 过于复杂，训练不稳定 (+6-8% 退步)
+17. **更大/更深架构不如默认** — hidden=48, TL=4 都比 hidden=32, TL=3 更差，当前数据量下默认架构就是最优
 
 ---
 
@@ -817,6 +838,79 @@ Per-horizon MAE:
 - **i6_r20 (physics_mode='feature') 仍然是最佳配置** — 其他集成方式全部更差
 - Physics module 保留为 feature 模式（中性，论文叙事需要，ablation 可展示）
 - 后续优化方向：搜参进一步提升 avg12 MAE（目前 +0.9%，唯一未超越的指标）
+
+---
+
+### Iteration 9: Patience Extension + Horizon-adaptive Physics
+
+**Date:** 2026-03-26
+
+**Data motivation:**
+- i6_r20 在 patience=15 下 epoch 19 收敛，增大 patience 可能让模型探索更久
+- i8_residual 在 avg6 上最好 (1.810) 但 avg24 差，设计 horizon-adaptive 让修正随步数衰减
+
+**Experiments:**
+
+| Exp ID | 改动 | Best Ep | avg6 | avg12 | avg24 | RMSE | vs i6_r20 |
+|--------|------|---------|------|-------|-------|------|-----------|
+| (i6_r20) | baseline | 19 | 1.835 | 2.028 | 2.267 | 10.702 | — |
+| i9_p30 | patience=30 | 19 | 1.839 | 2.031 | 2.274 | 10.697 | +0.3% |
+| i9_p50 | patience=50 | 19 | 1.834 | 2.026 | 2.267 | 10.702 | +0.0% |
+| i9_hadapt | horizon-adaptive physics | 6 | 2.110 | 2.227 | 2.413 | 11.338 | +6.4% (worse) |
+| i9_hadapt_lr5e4 | hadapt + LR=0.0005 | 25 | 2.094 | 2.259 | 2.447 | 12.214 | +7.9% (worse) |
+| i9_hadapt_p50 | hadapt + patience=50 | 6 | 2.107 | 2.223 | 2.409 | 11.409 | +6.2% (worse) |
+
+**Analysis:**
+
+**1. Patience 增大无效:**
+- i9_p30 和 i9_p50 的 best_epoch 都还是 19，和 i6_r20 完全一样
+- LR=0.001 下模型的最优解就在 epoch 19 附近，更多 patience 不改变这个事实
+- 这间接证明了 **LR 才是关键因素**（hp_lr3e4 用 LR=0.0003 训练到了 epoch 32）
+
+**2. Horizon-adaptive physics 全面失败 (+6-8%):**
+- 所有 3 个 hadapt 变体都严重退步，比 i8_residual (+1.3%) 更差得多
+- best_epoch=6 说明 horizon_gate 参数的引入严重干扰了训练
+- 即使 LR 降低到 0.0005，avg24 和 RMSE 反而是最差的（12.214）
+- **结论**: per-step gate 的设计过于复杂，模型无法有效学习 gate 和 correction 的组合
+
+**Decision:** patience 和 horizon-adaptive 都不是有效的改进方向。LR 调优（如 hp_lr3e4）是更可靠的提升路径。
+
+---
+
+### Hypersearch: Residual Mode 超参搜索 (Phase 1-2)
+
+**Date:** 2026-03-26
+
+**Base config:** i8_residual (physics_mode=residual) + i6_r20 其他参数
+
+**Phase 1: 训练参数搜索** (base: residual mode)
+
+| Exp ID | LR | Warmup | Best Ep | avg6 | avg12 | avg24 | RMSE | vs i8_residual |
+|--------|-----|--------|---------|------|-------|-------|------|---------------|
+| (i8_residual) | 0.001 | 5 | 14 | 1.810 | 2.030 | 2.297 | 10.673 | — |
+| **hp_lr3e4** | **0.0003** | 5 | **32** | **1.808** | **2.011** | **2.276** | **10.462** | **-0.9%** |
+| hp_lr5e4 | 0.0005 | 5 | 25 | 1.826 | 2.027 | 2.289 | 10.582 | -0.3% |
+| hp_warm10 | 0.001 | 10 | 14 | 1.815 | 2.038 | 2.305 | 10.612 | +0.3% |
+
+> hp_bs16, hp_lr5e4_bs16, hp_stable: OOM (batch_size=16 超出显存)
+
+**Phase 1 最优: hp_lr3e4 (LR=0.0003)**
+- avg6=1.808 (全场最佳，-1.7% vs NRFormer)
+- avg12=2.011 (几乎追平 NRFormer 的 2.010！)
+- RMSE=10.462 (全场最佳，-10.2% vs NRFormer)
+- 训练到 epoch 32（i8_residual 只到 14），说明低 LR 让 correction head 更稳定地学习
+
+**Phase 2: 架构搜索** (base: residual + LR=0.0003)
+
+| Exp ID | 改动 | Best Ep | avg6 | avg12 | avg24 | RMSE | vs hp_lr3e4 |
+|--------|------|---------|------|-------|-------|------|------------|
+| (hp_lr3e4) | baseline | 32 | 1.808 | 2.011 | 2.276 | 10.462 | — |
+| hp2_h48 | hidden=48 | 22 | 1.825 | 2.028 | 2.294 | 10.701 | +0.8% (worse) |
+| hp2_tl4 | TL=4 | 9 | 1.872 | 2.062 | 2.309 | 10.520 | +1.5% (worse) |
+
+> hp2_sl3: OOM, hp2_ec256/hp2_drop02/hp2_ffn2: 还未完成
+
+**Phase 2 初步结论:** 更大/更深的架构在 residual+lr3e4 基础上反而更差。hidden=32, TL=3 就是最优架构。
 
 ---
 
