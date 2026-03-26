@@ -30,6 +30,53 @@ finish() {
 }
 
 # ============================================================
+# Iteration 9: i6_r20 patience + Horizon-adaptive Physics
+#   1. i6_r20 stopped at ep19 with patience=15, try patience=30
+#   2. i8_residual excels at avg6 (1.810) but avg24 worse
+#      → horizon_adaptive: strong correction on short-term, decay on long-term
+#   Base: i6_r20 config
+# ============================================================
+if [ "$1" == "--iter" ] && [ "$2" == "9" ]; then
+
+BEST="--use_log_space True --scheduler cosine --warmup_epochs 5 --use_rain_gate True"
+NRFIX="--temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
+ARCH="--fusion_type 2way --spatial_swap True"
+REGION="--num_region_clusters 20"
+
+GPU=${3:-"0"}
+echo "===== Iteration 9: Patience + Horizon-adaptive Physics (sequential on GPU $GPU) ====="
+
+# Exp 1: i6_r20 with patience=30 (simplest improvement)
+echo "[1/5] i9_p30"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i9_p30 --early_stop_steps 30
+
+# Exp 2: i6_r20 with patience=50 (even more exploration)
+echo "[2/5] i9_p50"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i9_p50 --early_stop_steps 50
+
+# Exp 3: horizon-adaptive physics (core innovation)
+echo "[3/5] i9_hadapt"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i9_hadapt --physics_mode horizon_adaptive --early_stop_steps 30
+
+# Exp 4: horizon-adaptive + lower LR (more stable training for correction head)
+echo "[4/5] i9_hadapt_lr5e4"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i9_hadapt_lr5e4 --physics_mode horizon_adaptive --early_stop_steps 30 \
+    --weight_lr 0.0005
+
+# Exp 5: horizon-adaptive + patience=50 (max training)
+echo "[5/5] i9_hadapt_p50"
+CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $BEST $NRFIX $ARCH $REGION \
+    --model_des i9_hadapt_p50 --physics_mode horizon_adaptive --early_stop_steps 50
+
+finish
+exit 0
+fi
+
+# ============================================================
 # Iteration 8: Physics Integration Modes
 #   Iter 7b showed physics-as-feature is inert (去掉持平).
 #   Try 3 better ways to inject physics knowledge:

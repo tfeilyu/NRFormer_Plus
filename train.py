@@ -65,7 +65,7 @@ parser.add_argument('--use_physics', type=bool, default=True, help='Iter7: enabl
 parser.add_argument('--simple_meteo', type=bool, default=False, help='Iter7: use NRFormer-style simple meteo encoder')
 parser.add_argument('--spatial_v_source', type=str, default='rad', help='Iter7: rad or temporal_mlp for spatial V')
 parser.add_argument('--early_stop_steps', type=int, default=15, help='early stopping patience (override yaml)')
-parser.add_argument('--physics_mode', type=str, default='feature', help='Iter8: feature/aux_loss/residual/light')
+parser.add_argument('--physics_mode', type=str, default='feature', help='Iter8: feature/aux_loss/residual/light/horizon_adaptive')
 parser.add_argument('--physics_lambda', type=float, default=0.01, help='Iter8: weight for physics aux loss')
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')

@@ -143,13 +143,22 @@ class PGRT2(nn.Module):
                 self.physics_module = AtmosphericDiffusionModule(config, self.noaa_list, adj_matrix=adj_np)
 
         # Iter8 方案B: physics residual correction head
-        if self.use_physics and self.physics_mode == 'residual':
+        if self.use_physics and self.physics_mode in ('residual', 'horizon_adaptive'):
             self.physics_correction = nn.Sequential(
                 nn.Linear(self.hidden_dim, self.hidden_dim),
                 nn.ReLU(),
                 nn.Linear(self.hidden_dim, self.out_steps),
             )
             self.physics_alpha = nn.Parameter(torch.tensor(0.1))  # learnable scaling
+
+        # Iter9: horizon-adaptive physics — correction decays with horizon
+        # Short-term steps get more correction, long-term steps get less
+        if self.use_physics and self.physics_mode == 'horizon_adaptive':
+            # Learnable decay rate tau (init=6: half-life ~4 steps)
+            self.horizon_tau = nn.Parameter(torch.tensor(6.0))
+            # Per-step learnable gate (init near 1 for short, 0 for long)
+            init_gate = torch.exp(-torch.arange(self.out_steps, dtype=torch.float32) / 6.0)
+            self.horizon_gate = nn.Parameter(init_gate)
 
         # Iter8 方案C: light physics — extra input channels (dC/dt + regional_dev)
         if self.physics_mode == 'light':
@@ -371,6 +380,14 @@ class PGRT2(nn.Module):
             correction = self.physics_correction(physics_constraint)  # [B, N, out_steps]
             correction = correction.unsqueeze(1)  # [B, 1, N, out_steps]
             output = output + self.physics_alpha * correction
+
+        # Iter9: horizon-adaptive physics — stronger correction for short-term, weaker for long-term
+        if self.use_physics and self.physics_mode == 'horizon_adaptive' and physics_constraint is not None:
+            correction = self.physics_correction(physics_constraint)  # [B, N, out_steps]
+            correction = correction.unsqueeze(1)  # [B, 1, N, out_steps]
+            # Apply horizon-dependent gate: sigmoid(gate) ensures [0, 1] range
+            h_gate = torch.sigmoid(self.horizon_gate)  # [out_steps]
+            output = output + self.physics_alpha * correction * h_gate
 
         # Iteration 1b: Residual prediction — add last known value
         if self.use_residual:
