@@ -109,9 +109,9 @@ Iteration 7b: Simplification Ablation                     ✅ Done (all 3 hypoth
     Basis: NRFormer vs NRFormer+ 逐行对比发现 3 个关键架构差异
     Result: physics neutral, simple_meteo worse, v_tmlp worse — gap not in architecture
 
-Iteration 8 (in progress): Physics Integration Modes
+Iteration 8: Physics Integration Modes                     ✅ Done (all 3 modes worse)
     Basis: physics-as-feature 是惰性的，需要更合理的集成方式
-    Experiments: aux_loss(λ=0.01/0.1), residual, light, light_nophys
+    Result: residual +1.3%, light +6.2%, aux_loss +6.6% — physics无论如何集成都无法改善MAE
 ```
 
 ---
@@ -579,8 +579,9 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 | 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 2.069 | 2.341 | 2.683 | 13 |
 | 6 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 2.070 | 2.349 | 2.704 | 10 |
 | 7 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 2.080 | 2.323 | 2.699 | 9 |
-| 8 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 2.091 | 2.335 | 2.725 | 5 |
-| 9 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 2.093 | 2.350 | 2.719 | 9 |
+| 8 | i8_residual | physics residual correction | 2.297 | 10.673 | 2.077 | 2.348 | 2.735 | 14 |
+| 9 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 2.091 | 2.335 | 2.725 | 5 |
+| 10 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 2.093 | 2.350 | 2.719 | 9 |
 | 10 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 2.080 | 2.347 | 2.751 | 10 |
 | 11 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 2.071 | 2.363 | 2.743 | 10 |
 | 12 | i1_res | residual only | 2.302 | 10.501 | 2.109 | 2.371 | 2.707 | 10 |
@@ -600,6 +601,10 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 | 26 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
 | 27 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
 | 28 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
+| 29 | i8_light | light physics features | 2.407 | 11.447 | 2.214 | 2.406 | 2.756 | 6 |
+| 30 | i8_light_nophys | light + no module | 2.408 | 11.454 | 2.214 | 2.405 | 2.760 | 6 |
+| 31 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.230 | 2.415 | 2.754 | 6 |
+| 32 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.229 | 2.416 | 2.755 | 6 |
 
 ---
 
@@ -617,6 +622,8 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 10. **MeteoEncoder 的分路径设计有价值** — 简化回 NRFormer 风格反而更差 (+1.4%)，wind/temp 分路径+时间卷积是有效的
 11. **Spatial V=rad_feat 优于 V=temporal_mlp** — 在 NRFormer+ 架构下，spatial_swap=True + V=rad_feat 是最优组合
 12. **12-16% gap 不在模型架构层面** — 三个架构假设全部被否定，gap 可能来源于数据处理/评估差异
+13. **Physics 知识无论如何集成都无法改善 MAE** — aux_loss (+6.6%), light (+6.2%), residual (+1.3%) 全部更差，physics-as-feature 是最不有害的方式
+14. **改变输入通道数很危险** — light 模式 (1ch→3ch) 导致 +6% 退步，temporal attention 对输入分布很敏感
 
 ---
 
@@ -751,21 +758,52 @@ radiation_start = light_physics_proj(light_input)  # [B, H, N, T]
 
 **Experiments** (base: i6_r20 config + patience=30):
 
-| Exp ID | Physics mode | λ | 描述 | T-MAE | T-RMSE | vs i6_r20 |
-|--------|-------------|---|------|-------|--------|-----------|
-| i8_aux_001 | aux_loss | 0.01 | 弱物理约束 | - | - | - |
-| i8_aux_01 | aux_loss | 0.1 | 强物理约束 | - | - | - |
-| i8_residual | residual | — | 输出残差修正 | - | - | - |
-| i8_light | light | — | 轻量物理特征注入 | - | - | - |
-| i8_light_nophys | light + no physics | — | 纯轻量特征，无 module | - | - | - |
+| Exp ID | Physics mode | λ | Best Ep | T-MAE | T-RMSE | Params | vs i6_r20 |
+|--------|-------------|---|---------|-------|--------|--------|-----------|
+| (i6_r20) | feature (base) | — | 19 | 2.2674 | 10.702 | 349K | — |
+| (i7_no_physics) | disabled | — | 19 | 2.2673 | 10.686 | 349K | -0.00% |
+| i8_residual | **residual** | — | 14 | 2.2974 | 10.673 | 350K | +1.32% |
+| i8_light | **light** | — | 6 | 2.4071 | 11.447 | 344K | +6.16% |
+| i8_light_nophys | **light + no module** | — | 6 | 2.4083 | 11.454 | 344K | +6.22% |
+| i8_aux_01 | **aux_loss** | 0.1 | 6 | 2.4172 | 11.524 | 348K | +6.61% |
+| i8_aux_001 | **aux_loss** | 0.01 | 6 | 2.4175 | 11.513 | 348K | +6.62% |
 
-**Run:**
-```bash
-bash go.sh --iter 8        # sequential on GPU 0
-bash go.sh --iter 8 2      # sequential on GPU 2
-```
+Per-horizon MAE:
+| Horizon | NRFormer | i6_r20 | i8_residual | i8_light | i8_aux_001 |
+|---------|----------|--------|-------------|----------|------------|
+| 6th | 1.84 | 2.077 | 2.077 | 2.214 | 2.229 |
+| 12th | 2.01 | 2.289 | 2.348 | 2.406 | 2.416 |
+| 24th | 2.28 | 2.648 | 2.735 | 2.756 | 2.755 |
 
-**Analysis:** (fill after)
+**Analysis:**
+
+**1. 所有新 physics 集成方式都更差:**
+- **Residual (+1.3%)**: 最好的新方案，但仍不如 i6_r20。物理修正项 α×correction 可能在训练初期引入不稳定性（best_epoch 从 19→14）
+- **Light (+6.2%)**: 把 dC/dt 和 regional_deviation 作为输入通道严重损害性能。可能原因：替换了原始的 1-channel radiation 输入为 3-channel，改变了预训练好的 temporal attention 的输入分布
+- **Aux loss (+6.6%)**: 辅助损失方式效果最差，best_epoch=6 说明训练很快就不稳定。物理一致性约束可能和 MAE 主损失方向冲突
+
+**2. λ 对 aux_loss 几乎无影响:**
+- i8_aux_001 (λ=0.01) 和 i8_aux_01 (λ=0.1) 结果几乎相同 (2.4175 vs 2.4172)
+- 说明辅助损失要么没学到有用的东西，要么被优化器忽略了
+
+**3. Light 和 light_nophys 几乎相同:**
+- 有无完整 physics module 不影响 light 模式 (2.4071 vs 2.4083)
+- 再次验证了 Iter 7b 的结论：physics module 是惰性的
+
+**4. 训练稳定性严重下降:**
+- i6_r20: best_epoch=19, i8_residual: 14, 其余: 6
+- 新方案都导致训练更快触发 early stopping，说明这些改动引入了优化困难
+
+**5. 核心结论:**
+- **Physics 知识在当前框架下无论如何集成都无法改善 MAE**
+- 三种方案（辅助损失、残差修正、轻量特征）全部失败
+- 原始的 physics-as-feature 是最不有害的方式（至少持平），但也无贡献
+- **Physics module 对于 MAE 优化是一个中性到有害的组件**
+
+**Decision:**
+- 在最终模型中可以选择 **保留 physics-as-feature**（持平，论文叙事需要）或 **移除**（简化）
+- 不再继续在 physics 集成方式上探索
+- 12-16% gap 需要从其他方向突破（数据处理一致性、评估流程对齐）
 
 ---
 
