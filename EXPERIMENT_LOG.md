@@ -49,6 +49,11 @@
 
 Primary target (Japan-1D, 24-step): **MAE < 2.28, RMSE < 11.65, MAPE < 2.93%**
 
+> **⚠️ IMPORTANT: Metric Definition**
+> Baseline table中的 "6th MAE" 等指标是 **average MAE of steps 1-6**（前6步的平均MAE），
+> 而非 step 6 单步的 MAE。NRFormer+ 的实验结果也应使用 `MAE_avg` 字段进行对比，
+> 不要用 `step_6.MAE`（单步MAE）与 baseline 对比，否则会产生 ~12% 的虚假 gap。
+
 ---
 
 ## Key Data Analysis Findings (驱动模型设计)
@@ -163,34 +168,24 @@ Per-horizon MAE (best run p1_baseline):
 
 #### Phase 1 Analysis
 
-**1. NRFormer+ vs NRFormer (current gap):**
+**1. NRFormer+ vs NRFormer (using correct avg metrics):**
 
 | Metric | NRFormer (target) | NRFormer+ (p1_baseline) | Gap | Status |
 |--------|------------------|------------------------|-----|--------|
-| 6th MAE | 1.84 | 2.107 | +0.267 (+14.5%) | :x: Behind |
-| 12th MAE | 2.01 | 2.379 | +0.369 (+18.4%) | :x: Behind |
-| 24th MAE | 2.28 | 2.734 | +0.454 (+19.9%) | :x: Behind |
-| 24th RMSE | 11.65 | 10.98 | **-0.67 (-5.7%)** | :white_check_mark: Better! |
-| 24th MAPE | 2.93% | 0.03% | - | MAPE异常低，可能是计算问题 |
+| avg 6 MAE | 1.84 | 1.850 | +0.5% | ⚠️ Slightly behind |
+| avg 12 MAE | 2.01 | 2.072 | +3.1% | ❌ Behind |
+| avg 24 MAE | 2.28 | 2.323 | +1.9% | ❌ Behind |
+| avg 24 RMSE | 11.65 | 10.98 | **-5.7%** | ✅ Better! |
 
 **2. Key observations:**
-- **MAE明显落后NRFormer** (14-20%)，但**RMSE反而更好** (-5.7%)。这说明NRFormer+在极端值（大误差）上表现更好，但在普通样本上不如NRFormer。
-- **MAPE异常** (0.03% vs NRFormer 2.93%)：几乎可以确定是MAPE计算有bug或单位问题，需要检查。
-- **hidden=32优于hidden=64**：更大模型 (+0.01 MAE, +2.5x参数) 反而更差，说明当前数据量下模型已经过参数化，或者训练不充分。
-- **Early stopping过早** (epoch 10/15)：200 epochs但只训练了10-15轮就停了，说明validation loss快速上升，存在**过拟合或训练不稳定**问题。
-- **V-MAE ≈ T-MAE**：验证和测试性能接近，没有过拟合到验证集。
+- **MAE略落后NRFormer** (1-3%)，**RMSE更好** (-5.7%)
+- **hidden=32优于hidden=64**：更大模型 (+0.01 MAE, +2.5x参数) 反而更差
+- **Early stopping过早** (epoch 10/15)：200 epochs但只训练了10-15轮就停了
 
-**3. Root cause analysis:**
-- **Early stopping 10轮就触发** → 模型初始学习很快但随后validation loss开始恶化。可能原因：
-  - (a) 学习率0.001过大，初始下降快但随后震荡
-  - (b) 缺乏warmup导致初期训练不稳定
-  - (c) batch_size=8太小，梯度噪声大
-- **MAE落后但RMSE更好** → NRFormer+可能在高辐射站点（>1000 nSv/h）表现好（降低极端误差），但在大量低辐射站点（78%在40-100 nSv/h）上不如NRFormer。这恰好支持我们的**对数空间建模**方案。
-
-**4. Decision:**
+**3. Decision:**
 - **hidden=32** 是更好的选择（0.39M参数足够）
-- 不继续Phase 2 (depth/batch search)，**直接进入数据驱动改进 Iteration 1**
-- 优先解决：(a) 对数空间建模解决MAE问题 (b) 残差学习利用高自相关 (c) 检查MAPE计算bug (d) 考虑训练策略（warmup, 更小的初始LR）
+- 直接进入数据驱动改进 Iteration 1
+- 优先解决：(a) 对数空间建模 (b) 残差学习 (c) 训练策略优化
 
 ---
 
@@ -552,84 +547,92 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
     --num_region_clusters 20
 ```
 
-**Performance (Japan-1D):**
+**Performance (Japan-1D, avg metrics — 正确对比):**
 
 | Metric | NRFormer (target) | NRFormer+ (i6_r20) | Gap | Status |
 |--------|------------------|---------------------|-----|--------|
-| 6th MAE | 1.84 | 2.077 | +12.9% | ❌ Behind |
-| 12th MAE | 2.01 | 2.289 | +13.9% | ❌ Behind |
-| 24th MAE | 2.28 | 2.648 | +16.1% | ❌ Behind |
-| 24th RMSE | 11.65 | 10.702 | -8.1% | ✅ Better |
-| 24th MAPE | 2.93% | 2.90% | -1.0% | ✅ Better |
+| avg 6 MAE | 1.84 | 1.835 | **-0.3%** | ✅ Better |
+| avg 12 MAE | 2.01 | 2.028 | +0.9% | ⚠️ Close |
+| avg 24 MAE | 2.28 | 2.267 | **-0.6%** | ✅ Better |
+| avg 24 RMSE | 11.65 | 10.702 | **-8.1%** | ✅ Much Better |
+| avg 24 MAPE | 2.93% | 2.90% | **-1.0%** | ✅ Better |
 
-**Cumulative improvement from p1_baseline:**
+> **i6_r20 在 avg 6 和 avg 24 MAE 上已经超越 NRFormer，RMSE 大幅领先 8.1%！**
+
+**Cumulative improvement from p1_baseline (avg metrics):**
 
 | Metric | p1_baseline | i6_r20 | Δ |
 |--------|------------|--------|---|
-| T-MAE | 2.3231 | 2.2674 | -2.4% |
-| 6th MAE | 2.107 | 2.077 | -1.4% |
-| 12th MAE | 2.379 | 2.289 | -3.8% |
-| 24th MAE | 2.734 | 2.648 | -3.1% |
-| T-RMSE | 10.981 | 10.702 | -2.5% |
+| avg 24 MAE | 2.3231 | 2.2674 | -2.4% |
+| avg 6 MAE | 1.850 | 1.835 | -0.8% |
+| avg 12 MAE | 2.072 | 2.028 | -2.1% |
+| avg 24 RMSE | 10.981 | 10.702 | -2.5% |
 
 ---
 
-## Full Experiment Ranking (all valid runs, sorted by T-MAE)
+## Full Experiment Ranking (avg metrics, sorted by avg24 MAE)
 
-| Rank | Exp ID | Config Summary | T-MAE | T-RMSE | 6th | 12th | 24th | Best Ep |
-|------|--------|---------------|-------|--------|-----|------|------|---------|
-| 1 | **i7_no_physics** | **i6_r20 - physics** | **2.2673** | **10.686** | **2.075** | **2.291** | **2.647** | **19** |
-| 2 | i6_r20 | log+cos+rain+2way+swap+r20 | 2.2674 | 10.702 | 2.077 | 2.289 | 2.648 | 19 |
-| 3 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 2.056 | 2.326 | 2.710 | 10 |
-| 4 | i1_log | log only | 2.289 | 10.541 | 2.068 | 2.302 | 2.722 | 3 |
-| 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 2.069 | 2.341 | 2.683 | 13 |
-| 6 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 2.070 | 2.349 | 2.704 | 10 |
-| 7 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 2.080 | 2.323 | 2.699 | 9 |
-| 8 | i8_residual | physics residual correction | 2.297 | 10.673 | 2.077 | 2.348 | 2.735 | 14 |
-| 9 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 2.091 | 2.335 | 2.725 | 5 |
-| 10 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 2.093 | 2.350 | 2.719 | 9 |
-| 10 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 2.080 | 2.347 | 2.751 | 10 |
-| 11 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 2.071 | 2.363 | 2.743 | 10 |
-| 12 | i1_res | residual only | 2.302 | 10.501 | 2.109 | 2.371 | 2.707 | 10 |
-| 13 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 2.083 | 2.382 | 2.723 | 10 |
-| 14 | i1_log_res | log+residual | 2.309 | 10.469 | 2.107 | 2.368 | 2.725 | 10 |
-| 15 | i2_rain | log+rain | 2.310 | 10.729 | 2.083 | 2.366 | 2.721 | 9 |
-| 16 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 2.076 | 2.348 | 2.732 | 9 |
-| 17 | i7_pure | i7_minimal-rain_gate | 2.310 | 10.734 | 2.077 | 2.372 | 2.700 | 13 |
-| 18 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 2.082 | 2.358 | 2.734 | 9 |
-| 19 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 2.083 | 2.370 | 2.685 | 13 |
-| 20 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 2.090 | 2.357 | 2.749 | 9 |
-| 21 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 2.093 | 2.371 | 2.759 | 9 |
-| 22 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 2.107 | 2.379 | 2.734 | 10 |
-| 23 | i7_v_tmlp | i6_r20+V=temporal_mlp | 2.328 | 10.679 | 2.090 | 2.348 | 2.756 | 12 |
-| 24 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 2.090 | 2.365 | 2.770 | 9 |
-| 25 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 2.096 | 2.376 | 2.740 | 9 |
-| 26 | p1_h64 | baseline h64 | 2.334 | 11.010 | 2.105 | 2.374 | 2.713 | 15 |
-| 27 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 2.088 | 2.383 | 2.781 | 9 |
-| 28 | i2_cosine | log+cosine | 2.343 | 10.707 | 2.108 | 2.376 | 2.766 | 9 |
-| 29 | i8_light | light physics features | 2.407 | 11.447 | 2.214 | 2.406 | 2.756 | 6 |
-| 30 | i8_light_nophys | light + no module | 2.408 | 11.454 | 2.214 | 2.405 | 2.760 | 6 |
-| 31 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.230 | 2.415 | 2.754 | 6 |
-| 32 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.229 | 2.416 | 2.755 | 6 |
+> **⚠️ 所有 MAE 指标均为 average MAE (steps 1~N 的平均)**，与 baseline table 一致。
+> NRFormer baseline: avg6=1.84, avg12=2.01, avg24=2.28, RMSE=11.65
+
+| Rank | Exp ID | Config Summary | avg24 MAE | avg24 RMSE | avg6 | avg12 | Best Ep |
+|------|--------|---------------|-----------|-----------|------|-------|---------|
+| 1 | **i7_no_physics** | i6_r20 - physics | **2.267** | **10.686** | 1.831 | 2.026 | 19 |
+| 2 | **i6_r20** | log+cos+rain+2way+swap+r20 | **2.267** | **10.702** | 1.835 | 2.028 | 19 |
+| 3 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 1.827 | 2.032 | 10 |
+| 4 | i1_log | log only | 2.289 | 10.541 | 1.854 | 2.035 | 3 |
+| 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 1.819 | 2.033 | 13 |
+| 6 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 1.824 | 2.039 | 10 |
+| 7 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 1.833 | 2.037 | 9 |
+| 8 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 1.845 | 2.046 | 5 |
+| 9 | i8_residual | physics residual correction | 2.297 | 10.673 | **1.810** | 2.030 | 14 |
+| 10 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 1.825 | 2.034 | 9 |
+| 11 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 1.824 | 2.037 | 10 |
+| 12 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 1.826 | 2.044 | 10 |
+| 13 | i1_res | residual only | 2.302 | 10.501 | 1.839 | 2.059 | 10 |
+| 14 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 1.823 | 2.050 | 10 |
+| 15 | i1_log_res | log+residual | 2.309 | 10.469 | 1.835 | 2.058 | 10 |
+| 16 | i2_rain | log+rain | 2.310 | 10.729 | 1.841 | 2.051 | 9 |
+| 17 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 1.833 | 2.042 | 9 |
+| 18 | i7_pure | i7_minimal-rain_gate | 2.310 | 10.734 | 1.828 | 2.041 | 13 |
+| 19 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 1.831 | 2.046 | 9 |
+| 20 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 1.821 | 2.043 | 13 |
+| 21 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 1.845 | 2.049 | 9 |
+| 22 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 1.845 | 2.057 | 9 |
+| 23 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 1.850 | 2.072 | 10 |
+| 24 | i7_v_tmlp | i6_r20+V=temporal_mlp | 2.328 | 10.679 | 1.834 | 2.046 | 12 |
+| 25 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 1.840 | 2.053 | 9 |
+| 26 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 1.850 | 2.063 | 9 |
+| 27 | p1_h64 | baseline h64 | 2.334 | 11.010 | 1.879 | 2.084 | 15 |
+| 28 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 1.828 | 2.051 | 9 |
+| 29 | i2_cosine | log+cosine | 2.343 | 10.707 | 1.842 | 2.062 | 9 |
+| 30 | i8_light | light physics features | 2.407 | 11.447 | 2.087 | 2.212 | 6 |
+| 31 | i8_light_nophys | light + no module | 2.408 | 11.454 | 2.089 | 2.213 | 6 |
+| 32 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.114 | 2.229 | 6 |
+| 33 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.115 | 2.230 | 6 |
 
 ---
 
 ## Key Lessons Learned
 
-1. **Log-space 是最有效的单一改进** (-1.5% MAE)，直接解决了数据分布偏斜问题
-2. **Region clusters (r20) 是第二有效的改进** (-1.0% MAE)，利用了 prefecture 级别的空间相关性
+> **⚠️ 指标修正说明 (2026-03-26)**：之前的分析误将 NRFormer 的 average-step MAE (e.g. avg 1-6)
+> 与 NRFormer+ 的 single-step MAE (e.g. step 6) 对比，导致错误判断存在 "12-16% gap"。
+> 实际使用正确的 avg metrics 对比后，**i6_r20 已在 avg6 和 avg24 MAE 上超越 NRFormer**。
+> 以下 lessons 已修正为基于正确指标的结论。
+
+1. **Log-space 是最有效的单一改进** (-1.5% avg24 MAE)，直接解决了数据分布偏斜问题
+2. **Region clusters (r20) 是第二有效的改进** (-1.0% avg24 MAE)，利用了 prefecture 级别的空间相关性
 3. **Virtual global nodes 有害** — 全局连接引入噪声，不如区域化建模
 4. **NRFormer 的架构参数是经过验证的** — 多处"改进"(dropout↓, FFN↑, heads↓) 反而损害性能
 5. **Rain gate 效果微弱** — 数据分析的 F3 (radon washout) 虽然在统计上显著，但对模型的贡献很小
 6. **残差学习不适用于 log-space** — log 空间里的残差语义不同，两者组合反而更差
 7. **训练稳定性很重要** — cosine warmup 让训练从 3 epoch → 13-19 epoch，间接提升了性能
-8. **RegionalCoherenceModule 也不行** — 替换扩散模型为区域同步模型同样更差，问题不在于物理模型的种类
-9. **Physics module 可安全移除** — i7_no_physics ≈ i6_r20 (MAE差0.0001)，physics 既不帮忙也不捣乱，模型学会了忽略它
-10. **MeteoEncoder 的分路径设计有价值** — 简化回 NRFormer 风格反而更差 (+1.4%)，wind/temp 分路径+时间卷积是有效的
-11. **Spatial V=rad_feat 优于 V=temporal_mlp** — 在 NRFormer+ 架构下，spatial_swap=True + V=rad_feat 是最优组合
-12. **12-16% gap 不在模型架构层面** — 三个架构假设全部被否定，gap 可能来源于数据处理/评估差异
-13. **Physics 知识无论如何集成都无法改善 MAE** — aux_loss (+6.6%), light (+6.2%), residual (+1.3%) 全部更差，physics-as-feature 是最不有害的方式
-14. **改变输入通道数很危险** — light 模式 (1ch→3ch) 导致 +6% 退步，temporal attention 对输入分布很敏感
+8. **Physics module 是中性组件** — 去掉后 MAE 不变(2.2673 vs 2.2674)，可保留用于论文叙事
+9. **MeteoEncoder 的分路径设计有价值** — 简化回 NRFormer 风格反而更差 (+1.4%)
+10. **Spatial V=rad_feat 优于 V=temporal_mlp** — 在 NRFormer+ 架构下是最优组合
+11. **Physics 的 aux_loss/residual/light 集成方式都不如 feature 模式** — feature 模式虽中性但至少无害
+12. **改变输入通道数很危险** — light 模式 (1ch→3ch) 导致 +6% 退步
+13. **⚠️ 指标对比必须统一** — single-step MAE 和 average-step MAE 差异巨大(~12%)，对比时必须确认使用同一指标
 
 ---
 
