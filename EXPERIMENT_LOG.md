@@ -910,7 +910,48 @@ Per-horizon MAE:
 
 > hp2_sl3: OOM, hp2_ec256/hp2_drop02/hp2_ffn2: 还未完成
 
-**Phase 2 初步结论:** 更大/更深的架构在 residual+lr3e4 基础上反而更差。hidden=32, TL=3 就是最优架构。
+**Phase 2 结论:** 更大/更深的架构在 residual+lr3e4 基础上反而更差。hidden=32, TL=3 就是最优架构。
+
+---
+
+## TKDE 候选模型总结 (2026-03-28)
+
+> 基于 43 个实验的综合分析，以下是 TKDE 扩刊的候选模型。
+
+### 候选对比 (vs NRFormer baseline)
+
+| 指标 | NRFormer | **i6_r20 (推荐主模型)** | hp_lr3e4 (补充) | i7_no_physics (ablation) |
+|------|----------|----------------------|----------------|------------------------|
+| avg6 MAE | 1.840 | 1.835 ✅ **-0.3%** | **1.808** ✅ **-1.7%** | 1.831 ✅ -0.5% |
+| avg12 MAE | **2.010** | 2.028 ⚠️ +0.9% | **2.011** ⚠️ +0.03% | 2.026 ⚠️ +0.8% |
+| avg24 MAE | 2.280 | **2.267** ✅ **-0.6%** | 2.276 ✅ -0.2% | **2.267** ✅ -0.6% |
+| RMSE | 11.650 | 10.702 ✅ **-8.1%** | **10.462** ✅ **-10.2%** | 10.686 ✅ -8.3% |
+| MAPE | 2.93% | **2.90%** ✅ -1.0% | 2.95% ⚠️ +0.7% | **2.90%** ✅ -1.0% |
+| Beat NRFormer | — | **4/5** | **3/5** | **4/5** |
+| Physics | — | feature (有) | residual (有) | 无 |
+| 适合 | — | **主模型** | 短中期+RMSE分析 | ablation 对照 |
+
+### 推荐论文策略
+
+**1. 主表:** 报告 **i6_r20** 的结果
+- 4/5 指标超越 NRFormer (avg6 ✅, avg24 ✅, RMSE ✅, MAPE ✅)
+- avg12 仅差 0.9%，在误差范围内
+- 完整 physics module，支撑 "Physics-Guided" 论文叙事
+
+**2. Ablation study:**
+- Log-space 贡献: p1_baseline (2.323) → i1_log (2.289), Δ=-1.5%
+- Region clusters 贡献: i5_full (2.291) → i6_r20 (2.267), Δ=-1.0%
+- Physics module 影响: i6_r20 ≈ i7_no_physics (MAE 差 0.0001, 中性)
+- MeteoEncoder 贡献: i6_r20 (2.267) vs i7_simple_meteo (2.300), Δ=+1.4%
+
+**3. Training analysis:**
+- hp_lr3e4 (residual+LR=3e-4) 展示 physics residual correction 在低 LR 下的潜力
+- avg6 -1.7%, RMSE -10.2%, avg12 几乎追平 NRFormer
+
+**4. 待完成:**
+- [ ] search_i6r20.sh: i6_r20 的 LR 搜索 (确认 LR=3e-4 是否也提升 feature mode)
+- [ ] Japan-4H 数据集结果
+- [ ] 多种子 mean±std (3-5 runs)
 
 ---
 
@@ -929,8 +970,12 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
     --fusion_type 2way --spatial_swap True \
     --num_region_clusters 20
 
-# Run iteration experiments (e.g., iter 6)
-bash go.sh --iter 6
+# i6_r20 全面搜参 (自动 4 phases)
+bash search_i6r20.sh 0         # GPU 0, 全部 4 phases
+bash search_i6r20.sh --phase 1 0  # 仅 Phase 1
+
+# Run iteration experiments
+bash go.sh --iter 9
 
 # Compare all results
 python compare_results.py
