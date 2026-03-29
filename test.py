@@ -22,6 +22,22 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+def str2bool(value):
+    """Parse common string forms of booleans for argparse."""
+    if isinstance(value, bool):
+        return value
+
+    normalized = value.strip().lower()
+    if normalized in {'true', 't', '1', 'yes', 'y'}:
+        return True
+    if normalized in {'false', 'f', '0', 'no', 'n'}:
+        return False
+
+    raise argparse.ArgumentTypeError(
+        f"Invalid boolean value: {value!r}. Use one of true/false, yes/no, 1/0."
+    )
+
+
 def data_matrix_processing(data_matrix):
     data = []
     length = len(data_matrix)
@@ -109,10 +125,11 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='1D-data', help='model dataset')
     parser.add_argument('--model_name', type=str, default='NRFormer_Plus_v3', help='NRFormer, NRFormer_Plus_v1, v2, v3')
 
-    parser.add_argument('--sudden_change', type=bool, default=False)
+    parser.add_argument('--sudden_change', type=str2bool, default=False)
 
     parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
     parser.add_argument('--run_times', type=int, default=1, help='number of run')
+    parser.add_argument('--seed', type=int, default=None, help='random seed override')
     parser.add_argument('--model_des', type=str, default='123', help='save model param')
     args = parser.parse_args()
 
@@ -131,7 +148,8 @@ if __name__ == "__main__":
     device = torch.device('cuda:{}'.format(args.gpu_ids[0])) if args.gpu_ids else torch.device('cpu')
     model_args['device'] = device
 
-    all_args = {**vars(args), **model_args, **data_args, **trainer_args}
+    cli_overrides = {k: v for k, v in vars(args).items() if v is not None}
+    all_args = {**vars(args), **model_args, **data_args, **trainer_args, **cli_overrides}
 
     # data processing
     TFdata = RadiationDataProcessing(all_args)
@@ -164,7 +182,7 @@ if __name__ == "__main__":
         dataloader['sudden_change_loader'] = DataLoaderM(sudden_change_x, sudden_change_y, all_args['batch_size'])
 
 
-    seed = 1
+    seed = all_args.get('seed', 1)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -271,4 +289,3 @@ if __name__ == "__main__":
             predict_model(name)
 
     print('Great, {} model test have done!'.format(args.model_des))
-

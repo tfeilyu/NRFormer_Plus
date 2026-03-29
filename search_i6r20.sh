@@ -350,17 +350,17 @@ else:
     echo "Training: LR=$BEST_LR, warmup=$BEST_WARMUP, scheduler=$BEST_SCHED"
     echo ""
 
-    # Exp 1: Best combo
+    # Exp 1: Best combo with the default paper seed
     echo ">>> Running s4_best"
     CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $FEAT $NRFIX $TRAIN \
-        --model_des s4_best $COMBO_FLAGS || echo "FAILED: s4_best"
+        --model_des s4_best --seed 2025 $COMBO_FLAGS || echo "FAILED: s4_best"
 
     # Exp 2-4: Multi-seed for paper (mean ± std)
     for seed in 2025 2026 2027; do
         echo ""
         echo ">>> Running s4_seed${seed}"
         CUDA_VISIBLE_DEVICES=$GPU python train.py $COMMON $FEAT $NRFIX $TRAIN \
-            --model_des s4_seed${seed} $COMBO_FLAGS || echo "FAILED: s4_seed${seed}"
+            --model_des s4_seed${seed} --seed ${seed} $COMBO_FLAGS || echo "FAILED: s4_seed${seed}"
     done
 
     print_phase_results "s4_" "Phase 4: Best Combo + Multi-seed"

@@ -22,23 +22,40 @@ wandb.login()
 
 run_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
+
+def str2bool(value):
+    """Parse common string forms of booleans for argparse."""
+    if isinstance(value, bool):
+        return value
+
+    normalized = value.strip().lower()
+    if normalized in {'true', 't', '1', 'yes', 'y'}:
+        return True
+    if normalized in {'false', 'f', '0', 'no', 'n'}:
+        return False
+
+    raise argparse.ArgumentTypeError(
+        f"Invalid boolean value: {value!r}. Use one of true/false, yes/no, 1/0."
+    )
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: 0; use -1 for CPU')
 parser.add_argument('--dataset', type=str, default='1D-data', help='model dataset')
 parser.add_argument('--model_name', type=str, default='NRFormer_Plus', help='NRFormer, NRFormer_Plus')
 parser.add_argument('--batch_size', type=int, default=8, help='NRFormer, NRFormer_Plus')
 
-parser.add_argument('--use_RevIN', type=bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--use_RevIN', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
 
-parser.add_argument('--IsLocationEncoder', type=bool, default=True, help='NRFormer, NRFormer_Plus')
-parser.add_argument('--IsLocationInfo', type=bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--IsLocationEncoder', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--IsLocationInfo', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
 
-parser.add_argument('--Is_wind_angle', type=bool, default=True, help='NRFormer, NRFormer_Plus')
-parser.add_argument('--Is_wind_speed', type=bool, default=True, help='NRFormer, NRFormer_Plus')
-parser.add_argument('--Is_air_temperature', type=bool, default=True, help='NRFormer, NRFormer_Plus')
-parser.add_argument('--Is_dew_point', type=bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--Is_wind_angle', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--Is_wind_speed', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--Is_air_temperature', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--Is_dew_point', type=str2bool, default=True, help='NRFormer, NRFormer_Plus')
 
-parser.add_argument('--IsDayOfYearEmbedding', type=bool, default=False, help='NRFormer, NRFormer_Plus')
+parser.add_argument('--IsDayOfYearEmbedding', type=str2bool, default=False, help='NRFormer, NRFormer_Plus')
 
 parser.add_argument('--num_temporal_att_layer', type=int, default=2, help='NRFormer, NRFormer_Plus')
 parser.add_argument('--num_spatial_att_layer', type=int, default=2, help='NRFormer, NRFormer_Plus')
@@ -49,20 +66,20 @@ parser.add_argument('--temporal_dropout', type=float, default=0.1, help='dropout
 parser.add_argument('--ffn_ratio', type=int, default=4, help='FFN expansion ratio in temporal attention')
 parser.add_argument('--spatial_heads', type=int, default=4, help='number of attention heads in spatial module')
 
-parser.add_argument('--use_log_space', type=bool, default=False, help='Iter1: log-space modeling')
-parser.add_argument('--use_residual', type=bool, default=False, help='Iter1: residual prediction')
-parser.add_argument('--use_rain_gate', type=bool, default=False, help='Iter2: rain-aware gating')
+parser.add_argument('--use_log_space', type=str2bool, default=False, help='Iter1: log-space modeling')
+parser.add_argument('--use_residual', type=str2bool, default=False, help='Iter1: residual prediction')
+parser.add_argument('--use_rain_gate', type=str2bool, default=False, help='Iter2: rain-aware gating')
 parser.add_argument('--scheduler', type=str, default='multistep', help='Iter2: multistep or cosine')
 parser.add_argument('--warmup_epochs', type=int, default=5, help='Iter2: warmup epochs for cosine scheduler')
 parser.add_argument('--weight_lr', type=float, default=0.001, help='learning rate (override yaml)')
 parser.add_argument('--num_global_nodes', type=int, default=0, help='Iter3: virtual global nodes for spatial attn')
 parser.add_argument('--fusion_type', type=str, default='3way', help='Iter5: 2way or 3way fusion')
-parser.add_argument('--spatial_swap', type=bool, default=False, help='Iter5: swap spatial Q/K and V')
+parser.add_argument('--spatial_swap', type=str2bool, default=False, help='Iter5: swap spatial Q/K and V')
 parser.add_argument('--horizon_weight', type=str, default='none', help='Iter5: none/linear/inverse_acf')
 parser.add_argument('--num_region_clusters', type=int, default=0, help='Iter4: region-aware attention (0=disabled, 15-20 recommended)')
 parser.add_argument('--physics_type', type=str, default='diffusion', help='Iter5: diffusion or regional')
-parser.add_argument('--use_physics', type=bool, default=True, help='Iter7: enable/disable physics module')
-parser.add_argument('--simple_meteo', type=bool, default=False, help='Iter7: use NRFormer-style simple meteo encoder')
+parser.add_argument('--use_physics', type=str2bool, default=True, help='Iter7: enable/disable physics module')
+parser.add_argument('--simple_meteo', type=str2bool, default=False, help='Iter7: use NRFormer-style simple meteo encoder')
 parser.add_argument('--spatial_v_source', type=str, default='rad', help='Iter7: rad or temporal_mlp for spatial V')
 parser.add_argument('--early_stop_steps', type=int, default=15, help='early stopping patience (override yaml)')
 parser.add_argument('--physics_mode', type=str, default='feature', help='Iter8: feature/aux_loss/residual/light/horizon_adaptive')
@@ -70,6 +87,7 @@ parser.add_argument('--physics_lambda', type=float, default=0.01, help='Iter8: w
 
 parser.add_argument('--epochs', type=int, default=300, help='number of epochs to search')
 parser.add_argument('--run_times', type=int, default=1, help='number of run')
+parser.add_argument('--seed', type=int, default=None, help='random seed override')
 parser.add_argument('--model_des', type=str, default='111', help='save model param')
 args = parser.parse_args()
 
