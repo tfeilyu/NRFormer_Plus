@@ -13,13 +13,18 @@
 #   bash clean_rerun_validations.sh --phase 1 0
 #   bash clean_rerun_validations.sh --phase 2 0
 #   bash clean_rerun_validations.sh --phase 3 0
-#   RUN_TAG=clean2 bash clean_rerun_validations.sh --phase 3 1
+#   bash clean_rerun_validations.sh --phase 5 0
+#   bash clean_rerun_validations.sh --paper 0
+#   RUN_TAG=clean2 bash clean_rerun_validations.sh --phase 6 1
 #
 # Phases:
 #   1. Clean feature-mode ablations
 #   2. Cross-family candidate validation
 #   3. True multi-seed validation on auto-selected top candidates
 #   4. Summary only
+#   5. Explicit paper-focused candidate validation
+#   6. Multi-seed validation on explicit paper candidates
+#   7. Paper summary only
 # ============================================================
 
 set -euo pipefail
@@ -55,6 +60,18 @@ RES_BASE="$RES_BASE --num_region_clusters 20 --physics_mode residual"
 RES_BASE="$RES_BASE --weight_lr 0.0003 --early_stop_steps 30"
 RES_BASE="$RES_BASE --temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8"
 
+# Explicit paper-safe line from the clean reruns:
+# DoY is now fixed to "off" for the paper line.
+# The main candidate is feature mode + no DoY + TL=4.
+PAPER_FEAT_BASE="$ARCH_CORE $NRFIX $BACKBONE"
+PAPER_FEAT_BASE="$PAPER_FEAT_BASE --IsDayOfYearEmbedding False --use_rain_gate True"
+PAPER_FEAT_BASE="$PAPER_FEAT_BASE --fusion_type 2way --spatial_swap True"
+PAPER_FEAT_BASE="$PAPER_FEAT_BASE --num_region_clusters 20 --physics_mode feature"
+PAPER_FEAT_BASE="$PAPER_FEAT_BASE --weight_lr 0.001 --early_stop_steps 30"
+PAPER_MAIN="$PAPER_FEAT_BASE --num_temporal_att_layer 4"
+PAPER_PHASE5_MODELS="${PAPER_PHASE5_MODELS:-paper_feat_nodoy_tl4 paper_feat_nodoy_tl3 paper_feat_nodoy_tl4_nophys paper_feat_nodoy_tl4_norain paper_feat_nodoy_tl3_lr3e4_ms paper_res_ffn2}"
+PAPER_MODELS="${PAPER_MODELS:-paper_feat_nodoy_tl4 paper_feat_nodoy_tl3_lr3e4_ms paper_res_ffn2}"
+
 print_usage() {
     cat <<EOF
 Clean rerun script for NRFormer+ validation experiments.
@@ -65,11 +82,19 @@ Usage:
   bash clean_rerun_validations.sh --phase 2 [GPU]
   bash clean_rerun_validations.sh --phase 3 [GPU]
   bash clean_rerun_validations.sh --phase 4
+  bash clean_rerun_validations.sh --phase 5 [GPU]
+  bash clean_rerun_validations.sh --phase 6 [GPU]
+  bash clean_rerun_validations.sh --phase 7
+  bash clean_rerun_validations.sh --paper [GPU]
 
 Environment:
   RUN_TAG=clean2      Change the fresh model_des prefix.
   SEEDS="2025 2026"   Override seed list for phase 3.
   TOPK=3              Number of auto-selected candidates for phase 3.
+  PAPER_PHASE5_MODELS="paper_feat_nodoy_tl4 paper_res_ffn2"
+                     Explicit paper single-run suffixes for phase 5.
+  PAPER_MODELS="paper_feat_nodoy_tl4 paper_res_ffn2"
+                     Explicit paper candidate suffixes for phase 6/7.
 EOF
 }
 
@@ -495,6 +520,99 @@ phase4() {
     fi
 }
 
+phase5() {
+    local gpu=$1
+    local phase5_suffixes=()
+    echo "===== Phase 5: Explicit paper-focused candidates (GPU ${gpu}) ====="
+
+    read -r -a phase5_suffixes <<< "${PAPER_PHASE5_MODELS}"
+    if [ "${#phase5_suffixes[@]}" -eq 0 ]; then
+        echo "ERROR: PAPER_PHASE5_MODELS is empty."
+        exit 1
+    fi
+
+    for suffix in "${phase5_suffixes[@]}"; do
+        case "$suffix" in
+            paper_feat_nodoy_tl4)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $PAPER_MAIN
+                ;;
+            paper_feat_nodoy_tl3)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $PAPER_FEAT_BASE
+                ;;
+            paper_feat_nodoy_tl4_nophys)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $PAPER_MAIN --use_physics False
+                ;;
+            paper_feat_nodoy_tl4_norain)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $PAPER_MAIN --use_rain_gate False
+                ;;
+            paper_feat_nodoy_tl3_lr3e4_ms)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $PAPER_FEAT_BASE \
+                    --scheduler multistep --warmup_epochs 0 \
+                    --weight_lr 0.0003 --early_stop_steps 50
+                ;;
+            paper_res_ffn2)
+                run_exp "$gpu" "${RUN_TAG}_${suffix}" $RES_BASE --ffn_ratio 2
+                ;;
+            *)
+                echo "ERROR: Unknown PAPER_PHASE5_MODELS entry: ${suffix}"
+                exit 1
+                ;;
+        esac
+    done
+
+    print_selected_results "${RUN_TAG}_paper_"
+}
+
+phase6() {
+    local gpu=$1
+    echo "===== Phase 6: Multi-seed validation on explicit paper candidates (GPU ${gpu}) ====="
+    echo "Seeds: ${SEEDS}"
+
+    local paper_suffixes=()
+    read -r -a paper_suffixes <<< "${PAPER_MODELS}"
+    if [ "${#paper_suffixes[@]}" -eq 0 ]; then
+        echo "ERROR: PAPER_MODELS is empty."
+        exit 1
+    fi
+
+    echo "Paper candidates:"
+    for suffix in "${paper_suffixes[@]}"; do
+        echo "  - ${RUN_TAG}_${suffix}"
+    done
+
+    for suffix in "${paper_suffixes[@]}"; do
+        local model_des
+        local base_args
+        model_des="${RUN_TAG}_${suffix}"
+        base_args=$(build_args_from_model "$model_des")
+        if [ -z "$base_args" ]; then
+            echo "ERROR: Missing base config for ${model_des}. Run Phase 5 first."
+            exit 1
+        fi
+
+        for seed in $SEEDS; do
+            run_exp "$gpu" "${RUN_TAG}_ms_${suffix}_s${seed}" $base_args --seed "$seed"
+        done
+    done
+
+    print_selected_results "${RUN_TAG}_ms_paper_"
+    for suffix in "${paper_suffixes[@]}"; do
+        print_group_stats "${RUN_TAG}_ms_${suffix}_"
+    done
+}
+
+phase7() {
+    local paper_suffixes=()
+    read -r -a paper_suffixes <<< "${PAPER_MODELS}"
+
+    print_selected_results "${RUN_TAG}_paper_"
+    print_selected_results "${RUN_TAG}_ms_paper_"
+
+    for suffix in "${paper_suffixes[@]}"; do
+        print_group_stats "${RUN_TAG}_ms_${suffix}_"
+    done
+}
+
 GPU="${2:-0}"
 if [ "${1:-}" == "--phase" ]; then
     phase="${2:-}"
@@ -504,8 +622,20 @@ if [ "${1:-}" == "--phase" ]; then
         2) phase2 "$GPU" ;;
         3) phase3 "$GPU" ;;
         4) phase4 ;;
+        5) phase5 "$GPU" ;;
+        6) phase6 "$GPU" ;;
+        7) phase7 ;;
         *) print_usage; exit 1 ;;
     esac
+    exit 0
+fi
+
+if [ "${1:-}" == "--paper" ]; then
+    GPU="${2:-0}"
+    echo "===== Running paper-focused phases 5-7 on GPU ${GPU} ====="
+    phase5 "$GPU"
+    phase6 "$GPU"
+    phase7
     exit 0
 fi
 

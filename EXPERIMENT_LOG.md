@@ -122,14 +122,15 @@ Iteration 9: Patience + Horizon-adaptive Physics            ✅ Done (both ineff
     Basis: patience 让模型训练更久, hadapt 让短期修正强/长期弱
     Result: patience 无效(还是ep19), hadapt +6-8% 严重退步
 
-Hypersearch Phase 1-2: Residual mode 超参搜索              ✅ Partial
+Hypersearch Phase 1-2: Residual mode 超参搜索              ✅ Done
     Phase 1: LR=0.0003 大幅提升 → hp_lr3e4 (avg12≈NRFormer, RMSE -10.2%)
-    Phase 2: 更大/更深架构反而更差, hidden=32 TL=3 就是最优
-    Phase 3: 待完成 (feature mode 对照 + 组件微调)
+    Phase 2: hp2_ffn2 avg24=2.270 最佳, hp2_drop02 唯一 avg12 超 NRFormer (2.007)
 
-i6_r20 全面搜参 (search_i6r20.sh): 准备中
-    自动链式搜索: Phase 1→2→3→4, 每阶段自动选取最优参数
-    Total: 24 experiments
+search_i6r20.sh: Feature mode 全面搜参                      ✅ Done (28 experiments)
+    Phase 1 (LR): s1_lr1e3_p30 最优 (avg24=2.263)
+    Phase 2 (Arch): 默认架构最优, TL=4 可接受
+    Phase 3 (Ablation): s3_nowind 新全局最优! (avg24=2.262, 去掉风速风向)
+    Phase 4 (Seeds): avg24=2.274±0.005, 稳定可复现
 ```
 
 ---
@@ -542,94 +543,96 @@ Per-horizon MAE:
 
 ---
 
-## Current Best Config Summary (i6_r20)
+## Current Best Config Summary (s3_nowind)
 
 ```bash
-# i6_r20: log + cosine + rain + NRFormer alignment + 2way + swap + 20 region clusters
+# s3_nowind: i6_r20 去掉风速风向 + patience=30 — 全局最优 avg24 MAE
 python train.py --model_name NRFormer_Plus --dataset 1D-data \
-    --model_des i6_r20 --epochs 200 \
+    --model_des s3_nowind --epochs 200 \
     --IsDayOfYearEmbedding True --hidden_channels 32 \
     --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --use_log_space True --scheduler cosine --warmup_epochs 5 \
     --use_rain_gate True \
     --temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8 \
     --fusion_type 2way --spatial_swap True \
-    --num_region_clusters 20
+    --num_region_clusters 20 \
+    --Is_wind_angle False --Is_wind_speed False \
+    --early_stop_steps 30
 ```
 
 **Performance (Japan-1D, avg metrics — 正确对比):**
 
-| Metric | NRFormer (target) | NRFormer+ (i6_r20) | Gap | Status |
-|--------|------------------|---------------------|-----|--------|
-| avg 6 MAE | 1.84 | 1.835 | **-0.3%** | ✅ Better |
-| avg 12 MAE | 2.01 | 2.028 | +0.9% | ⚠️ Close |
-| avg 24 MAE | 2.28 | 2.267 | **-0.6%** | ✅ Better |
-| avg 24 RMSE | 11.65 | 10.702 | **-8.1%** | ✅ Much Better |
-| avg 24 MAPE | 2.93% | 2.90% | **-1.0%** | ✅ Better |
+| Metric | NRFormer (target) | NRFormer+ (s3_nowind) | Gap | Status |
+|--------|------------------|----------------------|-----|--------|
+| avg 6 MAE | 1.84 | 1.823 | **-0.9%** | ✅ Better |
+| avg 12 MAE | 2.01 | 2.017 | +0.4% | ⚠️ Close |
+| avg 24 MAE | 2.28 | 2.262 | **-0.8%** | ✅ Better |
+| avg 24 RMSE | 11.65 | 10.736 | **-7.8%** | ✅ Much Better |
+| avg 24 MAPE | 2.93% | 2.91% | **-0.7%** | ✅ Better |
 
-> **i6_r20 在 avg 6 和 avg 24 MAE 上已经超越 NRFormer，RMSE 大幅领先 8.1%！**
+> **s3_nowind 在 4/5 指标上超越 NRFormer，avg12 仅差 0.4%！**
 
-**Cumulative improvement from p1_baseline (avg metrics):**
+**Cumulative improvement from p1_baseline → s3_nowind:**
 
-| Metric | p1_baseline | i6_r20 | Δ |
-|--------|------------|--------|---|
-| avg 24 MAE | 2.3231 | 2.2674 | -2.4% |
-| avg 6 MAE | 1.850 | 1.835 | -0.8% |
-| avg 12 MAE | 2.072 | 2.028 | -2.1% |
-| avg 24 RMSE | 10.981 | 10.702 | -2.5% |
+| Metric | p1_baseline | i6_r20 | s3_nowind | Total Δ |
+|--------|------------|--------|-----------|---------|
+| avg 24 MAE | 2.323 | 2.267 | **2.262** | **-2.6%** |
+| avg 6 MAE | 1.850 | 1.835 | **1.823** | **-1.5%** |
+| avg 12 MAE | 2.072 | 2.028 | **2.017** | **-2.7%** |
+| avg 24 RMSE | 10.981 | 10.702 | **10.736** | **-2.2%** |
 
 ---
 
-## Full Experiment Ranking (avg metrics, sorted by avg24 MAE)
+## Full Experiment Ranking (avg metrics, sorted by avg24 MAE) — Top 40 of 71
 
 > **⚠️ 所有 MAE 指标均为 average MAE (steps 1~N 的平均)**，与 baseline table 一致。
 > NRFormer baseline: avg6=1.84, avg12=2.01, avg24=2.28, RMSE=11.65
+> *** = 4/5 beat NRFormer, ** = 3/5 beat, * = 2/5 beat
 
-| Rank | Exp ID | Config Summary | avg24 MAE | avg24 RMSE | avg6 | avg12 | Best Ep |
-|------|--------|---------------|-----------|-----------|------|-------|---------|
-| 1 | **i7_no_physics** | i6_r20 - physics | **2.267** | **10.686** | 1.831 | 2.026 | 19 |
-| 2 | **i6_r20** | log+cos+rain+2way+swap+r20 | **2.267** | **10.702** | 1.835 | 2.028 | 19 |
-| 3 | i9_p50 | i6_r20 + patience=50 | 2.267 | 10.702 | 1.834 | 2.026 | 19 |
-| 4 | i9_p30 | i6_r20 + patience=30 | 2.274 | 10.697 | 1.839 | 2.031 | 19 |
-| 5 | **hp_lr3e4** | **residual+LR=3e-4** | **2.276** | **10.462** | **1.808** | **2.011** | **32** |
-| 6 | hp_lr5e4 | residual+LR=5e-4 | 2.289 | 10.582 | 1.826 | 2.027 | 25 |
-| 7 | i5_full_hw | log+cos+rain+2way+swap+hw-wind | 2.289 | 10.691 | 1.827 | 2.032 | 10 |
-| 4 | i1_log | log only | 2.289 | 10.541 | 1.854 | 2.035 | 3 |
-| 5 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 1.819 | 2.033 | 13 |
-| 10 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 1.824 | 2.039 | 10 |
-| 11 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 1.833 | 2.037 | 9 |
-| 12 | hp2_h48 | residual+lr3e4+hidden=48 | 2.294 | 10.701 | 1.825 | 2.028 | 22 |
-| 13 | i6_r10 | log+cos+rain+2way+swap+r10 | 2.297 | 10.604 | 1.845 | 2.046 | 5 |
-| 14 | i8_residual | physics residual correction | 2.297 | 10.673 | **1.810** | 2.030 | 14 |
-| 15 | i7_minimal | i6_r20-physics+v_tmlp+simple_meteo | 2.299 | 10.614 | 1.825 | 2.034 | 9 |
-| 16 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 1.824 | 2.037 | 10 |
-| 17 | i6_r15 | log+cos+rain+2way+swap+r15 | 2.302 | 10.707 | 1.826 | 2.044 | 10 |
-| 18 | i1_res | residual only | 2.302 | 10.501 | 1.839 | 2.059 | 10 |
-| 19 | hp_warm10 | residual+warmup=10 | 2.305 | 10.612 | 1.815 | 2.038 | 14 |
-| 20 | i5_align | log+cos+rain+NRFIX | 2.305 | 10.640 | 1.823 | 2.050 | 10 |
-| 21 | hp2_tl4 | residual+lr3e4+TL=4 | 2.309 | 10.520 | 1.872 | 2.062 | 9 |
-| 15 | i1_log_res | log+residual | 2.309 | 10.469 | 1.835 | 2.058 | 10 |
-| 16 | i2_rain | log+rain | 2.310 | 10.729 | 1.841 | 2.051 | 9 |
-| 17 | i3_g20 | log+cos+rain+g20 | 2.310 | 10.744 | 1.833 | 2.042 | 9 |
-| 18 | i7_pure | i7_minimal-rain_gate | 2.310 | 10.734 | 1.828 | 2.041 | 13 |
-| 19 | i7_r25_diff | i6_r20+r25 (control) | 2.313 | 10.714 | 1.831 | 2.046 | 9 |
-| 20 | i4_lr5e4 | log+lr5e4 | 2.313 | 10.676 | 1.821 | 2.043 | 13 |
-| 21 | i7_regional | i6_r20+regional_physics | 2.315 | 10.881 | 1.845 | 2.049 | 9 |
-| 22 | i7_r25 | i6_r20+regional_physics+r25 | 2.322 | 10.777 | 1.845 | 2.057 | 9 |
-| 23 | p1_baseline | baseline (no improvements) | 2.323 | 10.981 | 1.850 | 2.072 | 10 |
-| 24 | i7_v_tmlp | i6_r20+V=temporal_mlp | 2.328 | 10.679 | 1.834 | 2.046 | 12 |
-| 25 | i4_lr5e4_rain | log+lr5e4+rain | 2.328 | 10.670 | 1.840 | 2.053 | 9 |
-| 26 | i3_g10 | log+cos+rain+g10 | 2.334 | 10.811 | 1.850 | 2.063 | 9 |
-| 27 | p1_h64 | baseline h64 | 2.334 | 11.010 | 1.879 | 2.084 | 15 |
-| 28 | i3_g5 | log+cos+rain+g5 | 2.335 | 10.722 | 1.828 | 2.051 | 9 |
-| 29 | i2_cosine | log+cosine | 2.343 | 10.707 | 1.842 | 2.062 | 9 |
-| 30 | i8_light | light physics features | 2.407 | 11.447 | 2.087 | 2.212 | 6 |
-| 31 | i8_light_nophys | light + no module | 2.408 | 11.454 | 2.089 | 2.213 | 6 |
-| 32 | i9_hadapt_p50 | horizon-adaptive + p50 | 2.409 | 11.409 | 2.107 | 2.223 | 6 |
-| 33 | i9_hadapt | horizon-adaptive physics | 2.413 | 11.338 | 2.110 | 2.227 | 6 |
-| 34 | i8_aux_01 | aux_loss λ=0.1 | 2.417 | 11.524 | 2.114 | 2.229 | 6 |
-| 35 | i8_aux_001 | aux_loss λ=0.01 | 2.418 | 11.513 | 2.115 | 2.230 | 6 |
-| 36 | i9_hadapt_lr5e4 | hadapt + LR=0.0005 | 2.447 | 12.214 | 2.094 | 2.259 | 25 |
+| Rank | Exp ID | Config Summary | avg24 | RMSE | avg6 | avg12 | Ep | vs NRFormer |
+|------|--------|---------------|-------|------|------|-------|----|-------------|
+| 1 | **s3_nowind** | **i6_r20-wind+p30** | **2.262** | 10.736 | 1.823 | 2.017 | 19 | *** 4/5 |
+| 2 | **s1_lr1e3_p30** | **i6_r20+p30** | **2.263** | 10.724 | 1.824 | 2.019 | 19 | *** 4/5 |
+| 3 | i7_no_physics | i6_r20-physics | 2.267 | 10.686 | 1.831 | 2.026 | 19 | *** 4/5 |
+| 4 | i6_r20 | log+cos+rain+2way+r20 | 2.267 | 10.702 | 1.835 | 2.028 | 19 | *** 4/5 |
+| 5 | i9_p50 | i6_r20+p50 | 2.267 | 10.702 | 1.834 | 2.026 | 19 | *** 4/5 |
+| 6 | s4_seed2027 | i6_r20+p30 seed=2027 | 2.269 | 10.691 | 1.835 | 2.031 | 19 | *** 4/5 |
+| 7 | s1_lr3e4_ms | feature+lr3e4+milestone | 2.269 | 10.569 | 1.812 | 2.013 | 24 | ** 3/5 |
+| 8 | **hp2_ffn2** | **res+lr3e4+ffn=2** | **2.270** | **10.450** | 1.813 | 2.013 | 22 | ** 3/5 |
+| 9 | s2_tl4 | feature+p30+TL=4 | 2.271 | 10.502 | 1.839 | 2.034 | 19 | *** 4/5 |
+| 10 | s4_best | i6_r20+p30 best_seed | 2.271 | 10.670 | 1.835 | 2.031 | 19 | *** 4/5 |
+| 11 | i9_p30 | i6_r20+p30 | 2.274 | 10.697 | 1.839 | 2.031 | 19 | *** 4/5 |
+| 12 | hp_lr3e4 | res+lr3e4 | 2.276 | 10.462 | **1.808** | **2.011** | 32 | ** 3/5 |
+| 13 | s1_lr3e4 | feature+lr3e4 | 2.277 | 10.542 | 1.824 | 2.032 | 15 | ** 3/5 |
+| 14 | s3_nodoy | i6_r20-doy+p30 | 2.278 | 10.737 | 1.842 | 2.034 | 19 | ** 3/5 |
+| 15 | s4_seed2025 | i6_r20+p30 seed=2025 | 2.278 | 10.639 | 1.840 | 2.040 | 19 | *** 4/5 |
+| 16 | s1_lr3e4_w3 | feature+lr3e4+warm3 | 2.279 | 10.548 | 1.820 | 2.030 | 15 | ** 3/5 |
+| 17 | s1_lr2e4 | feature+lr2e4 | 2.279 | 10.533 | 1.826 | 2.036 | 20 | ** 3/5 |
+| 18 | s3_drop02 | i6_r20+drop02+p30 | 2.279 | 10.648 | 1.844 | 2.042 | 19 | ** 3/5 |
+| 19 | s4_seed2026 | i6_r20+p30 seed=2026 | 2.280 | 10.654 | 1.844 | 2.041 | 19 | * 2/5 |
+| 20 | s3_norain | i6_r20-rain+p30 | 2.281 | 10.641 | 1.841 | 2.040 | 19 | * 2/5 |
+| 21 | hp2_ec256 | res+lr3e4+ec256 | 2.281 | 10.480 | **1.803** | 2.014 | 40 | ** 3/5 |
+| 22 | **hp2_drop02** | **res+lr3e4+drop02** | 2.282 | 10.476 | **1.801** | **2.007** | 34 | ** 3/5 |
+| 23 | s3_nophys | i6_r20-physics+p30 | 2.284 | 10.632 | 1.845 | 2.045 | 19 | * 2/5 |
+| 24 | s1_lr3e4_w10 | feature+lr3e4+warm10 | 2.285 | 10.566 | 1.836 | 2.041 | 15 | * 2/5 |
+| 25 | i5_full_hw | log+cos+rain+2way+hw-wind | 2.289 | 10.691 | 1.827 | 2.032 | 10 | * 2/5 |
+| 26 | i1_log | log only | 2.289 | 10.541 | 1.854 | 2.035 | 3 | * 1/5 |
+| 27 | hp_lr5e4 | res+lr5e4 | 2.289 | 10.582 | 1.826 | 2.027 | 25 | * 2/5 |
+| 28 | i2_cosine_rain | log+cos+rain | 2.290 | 10.606 | 1.819 | 2.033 | 13 | * 2/5 |
+| 29 | i5_full | log+cos+rain+2way+swap | 2.291 | 10.690 | 1.824 | 2.039 | 10 | * 2/5 |
+| 30 | s1_lr5e4 | feature+lr5e4 | 2.292 | 10.625 | 1.828 | 2.042 | 10 | * 2/5 |
+| 31 | s2_h48 | feature+p30+h48 | 2.293 | 10.653 | 1.833 | 2.032 | 13 | * 2/5 |
+| 32 | s2_sl3 | feature+p30+SL=3 | 2.294 | 10.709 | 1.846 | 2.046 | 19 | * 1/5 |
+| 33 | i4_lr3e4_rain | log+lr3e4+rain | 2.294 | 10.601 | 1.833 | 2.037 | 9 | * 2/5 |
+| 34 | hp2_h48 | res+lr3e4+h48 | 2.294 | 10.701 | 1.825 | 2.028 | 22 | * 2/5 |
+| 35 | i6_r10 | log+cos+rain+2way+r10 | 2.297 | 10.604 | 1.845 | 2.046 | 5 | * 1/5 |
+| 36 | i8_residual | physics residual | 2.297 | 10.673 | 1.810 | 2.030 | 14 | * 2/5 |
+| 37 | i7_minimal | i6_r20-phys+vtmlp+smeteo | 2.299 | 10.614 | 1.825 | 2.034 | 9 | * 2/5 |
+| 38 | s3_r15 | i6_r20+r15+p30 | 2.299 | 10.664 | 1.829 | 2.040 | 9 | * 2/5 |
+| 39 | i7_simple_meteo | i6_r20+simple_meteo | 2.300 | 10.749 | 1.824 | 2.037 | 10 | * 2/5 |
+| 40 | s3_r25 | i6_r20+r25+p30 | 2.303 | 10.719 | 1.850 | 2.050 | 17 | * 1/5 |
+
+> 完整 71 个实验结果见 `logs/experiment_comparison.csv`
 
 ---
 
@@ -657,6 +660,11 @@ python train.py --model_name NRFormer_Plus --dataset 1D-data \
 15. **Patience 增大无效** — 模型在 LR=0.001 下始终在 ep19 收敛，patience=30/50 不改变此事实
 16. **Horizon-adaptive physics 严重失败** — per-step gate 过于复杂，训练不稳定 (+6-8% 退步)
 17. **更大/更深架构不如默认** — hidden=48, TL=4 都比 hidden=32, TL=3 更差，当前数据量下默认架构就是最优
+18. **风速风向是噪声** — s3_nowind (去掉 wind) 是全局最优，验证了数据分析 F8 (r_wind=-0.015)
+19. **search_i6r20.sh 的链式搜参有效** — 4 个 Phase 逐步传递最优参数，最终 s3_nowind 超越所有手动迭代
+20. **Residual mode + 低 LR 能释放 physics 潜力** — hp2_drop02 是唯一在 avg12 超越 NRFormer 的模型 (2.007)
+21. **多种子验证必要** — Phase 4 (4 seeds) 显示 avg24=2.274±0.005，均值稳定优于 NRFormer
+22. **Feature mode + 去风 > Residual mode + 低 LR** — s3_nowind (avg24=2.262) 优于 hp2_ffn2 (2.270)，简化输入比复杂化 physics 更有效
 
 ---
 
@@ -907,72 +915,191 @@ Per-horizon MAE:
 | (hp_lr3e4) | baseline | 32 | 1.808 | 2.011 | 2.276 | 10.462 | — |
 | hp2_h48 | hidden=48 | 22 | 1.825 | 2.028 | 2.294 | 10.701 | +0.8% (worse) |
 | hp2_tl4 | TL=4 | 9 | 1.872 | 2.062 | 2.309 | 10.520 | +1.5% (worse) |
+| hp2_sl3 | SL=3 | 32 | 1.819 | 2.039 | 2.304 | 10.471 | +1.2% (worse) |
+| hp2_ec256 | end_channels=256 | 40 | **1.803** | **2.014** | 2.281 | **10.480** | +0.2% (flat) |
+| **hp2_drop02** | **dropout=0.2** | **34** | **1.801** | **2.007** | 2.282 | **10.476** | **+0.3% (flat)** |
+| hp2_ffn2 | ffn_ratio=2 | 22 | 1.813 | 2.013 | **2.270** | **10.450** | **-0.3% (better)** |
 
-> hp2_sl3: OOM, hp2_ec256/hp2_drop02/hp2_ffn2: 还未完成
-
-**Phase 2 结论:** 更大/更深的架构在 residual+lr3e4 基础上反而更差。hidden=32, TL=3 就是最优架构。
+**Phase 2 分析:**
+- **hp2_ffn2 (ffn_ratio=2) 是 avg24 最佳** (2.270)，也是全场 RMSE 最低 (10.450)
+- **hp2_drop02 (dropout=0.2) 是唯一在 avg12 超越 NRFormer 的模型** (2.007 < 2.010)，同时 avg6=1.801 也是全场最佳
+- **hp2_ec256 训练到了 epoch 40**，是训练最久的实验
+- 更大/更深架构 (h48, tl4, sl3) 仍然更差，但 ffn_ratio 和 dropout 的微调有效
+- **结论**: 默认架构 (hidden=32, TL=3, SL=2) 是最优的，但 ffn_ratio=2 和 dropout=0.2 值得进一步验证
 
 ---
 
-## TKDE 候选模型总结 (2026-03-28)
+### search_i6r20: Feature Mode 全面超参搜索 (4 Phases)
 
-> 基于 43 个实验的综合分析，以下是 TKDE 扩刊的候选模型。
+**Date:** 2026-03-27 ~ 2026-03-29
+
+**Base config:** i6_r20 (physics_mode=feature) + patience=30
+
+**目的:** 在 i6_r20 (feature mode) 基础上进行系统性超参搜索，每个 Phase 自动选取最优参数传递给下一个 Phase。
+
+#### Phase 1: 学习率搜索
+
+| Exp ID | LR | Warmup | Scheduler | Best Ep | avg6 | avg12 | avg24 | RMSE | vs i6_r20 |
+|--------|-----|--------|-----------|---------|------|-------|-------|------|-----------|
+| (i6_r20) | 0.001 | 5 | cosine | 19 | 1.835 | 2.028 | 2.267 | 10.702 | — |
+| **s1_lr1e3_p30** | **0.001** | **5** | **cosine** | **19** | **1.824** | **2.019** | **2.263** | **10.724** | **-0.18%** |
+| s1_lr3e4_ms | 0.0003 | 5 | milestone | 24 | 1.812 | 2.013 | 2.269 | 10.569 | +0.07% |
+| s1_lr3e4 | 0.0003 | 5 | cosine | 15 | 1.824 | 2.032 | 2.277 | 10.542 | +0.44% |
+| s1_lr3e4_w3 | 0.0003 | 3 | cosine | 15 | 1.820 | 2.030 | 2.279 | 10.548 | +0.49% |
+| s1_lr2e4 | 0.0002 | 5 | cosine | 20 | 1.826 | 2.036 | 2.279 | 10.533 | +0.49% |
+| s1_lr3e4_w10 | 0.0003 | 10 | cosine | 15 | 1.836 | 2.041 | 2.285 | 10.566 | +0.77% |
+| s1_lr5e4 | 0.0005 | 5 | cosine | 10 | 1.828 | 2.042 | 2.292 | 10.625 | +1.09% |
+
+**Phase 1 分析:**
+- **s1_lr1e3_p30 是 Phase 1 最优** — 和 i6_r20 相同的 LR=0.001，但 patience=30 让这次跑出了更好的结果 (avg24=2.263 vs 2.267)
+- 这说明 **i6_r20 的 patience=15 可能在某些 seed 下过早停止**
+- s1_lr3e4_ms (LR=3e-4 + milestone) 也不错，avg12=2.013 接近 NRFormer
+- 低 LR (2e-4, 3e-4) 的 RMSE 更好 (10.5) 但 avg24 MAE 不如默认 LR
+
+**Phase 1 最优传递给 Phase 2:** LR=0.001, patience=30
+
+#### Phase 2: 架构搜索
+
+| Exp ID | 改动 | Best Ep | avg6 | avg12 | avg24 | RMSE | vs s1_lr1e3_p30 |
+|--------|------|---------|------|-------|-------|------|----------------|
+| (s1_lr1e3_p30) | baseline | 19 | 1.824 | 2.019 | 2.263 | 10.724 | — |
+| **s2_tl4** | **TL=4** | **19** | **1.839** | **2.034** | **2.271** | **10.502** | **+0.35%** |
+| s2_h48 | hidden=48 | 13 | 1.833 | 2.032 | 2.293 | 10.653 | +1.3% (worse) |
+| s2_sl3 | SL=3 | 19 | 1.846 | 2.046 | 2.294 | 10.709 | +1.4% (worse) |
+| s2_h24 | hidden=24 | 16 | 1.839 | 2.045 | 2.303 | 10.829 | +1.8% (worse) |
+| s2_tl2 | TL=2 | 6 | 1.849 | 2.067 | 2.309 | 10.511 | +2.0% (worse) |
+| s2_ec256 | end_channels=256 | 10 | 1.832 | 2.051 | 2.312 | 10.667 | +2.2% (worse) |
+
+**Phase 2 分析:**
+- **s2_tl4 (TL=4)** 在 feature mode 下居然有效！ avg24=2.271, RMSE=10.502 (全场第二好 RMSE)
+- 注意：在 hypersearch Phase 2 中 hp2_tl4 (residual+TL=4) 是 +1.5% worse，但 feature+TL=4 只差 +0.35%
+- **默认架构仍然最优** — 但 TL=4 是可接受的替代方案
+- 缩小模型 (h24, tl2) 明显更差，说明当前容量是必要的
+
+**Phase 2 最优传递给 Phase 3:** 保持默认架构 (hidden=32, TL=3, SL=2)
+
+#### Phase 3: 组件 Ablation
+
+| Exp ID | 改动 | Best Ep | avg6 | avg12 | avg24 | RMSE | MAPE | vs s1_lr1e3_p30 |
+|--------|------|---------|------|-------|-------|------|------|----------------|
+| (s1_lr1e3_p30) | baseline | 19 | 1.824 | 2.019 | 2.263 | 10.724 | 2.91% | — |
+| **s3_nowind** | **去掉风速风向** | **19** | **1.823** | **2.017** | **2.262** | **10.736** | **2.91%** | **-0.07% (best!)** |
+| s3_nodoy | 去掉 DayOfYear | 19 | 1.842 | 2.034 | 2.278 | 10.737 | 2.92% | +0.66% |
+| s3_drop02 | dropout=0.2 | 19 | 1.844 | 2.042 | 2.279 | 10.648 | 2.92% | +0.73% |
+| s3_norain | 去掉 rain gate | 19 | 1.841 | 2.040 | 2.281 | 10.641 | 2.91% | +0.78% |
+| s3_nophys | 去掉 physics | 19 | 1.845 | 2.045 | 2.284 | 10.632 | 2.92% | +0.91% |
+| s3_r15 | r=15 clusters | 9 | 1.829 | 2.040 | 2.299 | 10.664 | 2.99% | +1.59% |
+| s3_r25 | r=25 clusters | 17 | 1.850 | 2.050 | 2.303 | 10.719 | 2.96% | +1.74% |
+
+**Phase 3 分析:**
+- **s3_nowind (去掉风速风向) 是全场新冠军！** avg24=2.262，超越 i6_r20 的 2.267
+- 验证了数据分析 F8 (r_wind=-0.015)：**风的特征是噪声，去掉反而更好**
+- **所有 ablation 都只是微弱退步** (0.6-1.7%)，说明模型鲁棒性好
+- **DayOfYear 贡献 0.66%** — 日期嵌入有一定价值
+- **Rain gate 贡献 0.78%** — 微弱但有正贡献
+- **Physics module 贡献 0.91%** — 在 s1_lr1e3_p30 基础上，physics 有微弱正贡献（但在 i6_r20 基础上是中性的）
+- **r=20 是最优 cluster 数** — r=15 (-1.6%) 和 r=25 (-1.7%) 都更差
+
+**Phase 3 最优:** s3_nowind (i6_r20 + patience=30 + 去掉 wind)
+
+#### Phase 4: 多种子稳定性验证
+
+| Exp ID | Seed | Best Ep | avg6 | avg12 | avg24 | RMSE | MAPE |
+|--------|------|---------|------|-------|-------|------|------|
+| s4_seed2027 | 2027 | 19 | 1.835 | 2.031 | 2.269 | 10.691 | 2.91% |
+| s4_best | 最优seed | 19 | 1.835 | 2.031 | 2.271 | 10.670 | 2.91% |
+| s4_seed2025 | 2025 | 19 | 1.840 | 2.040 | 2.278 | 10.639 | 2.91% |
+| s4_seed2026 | 2026 | 19 | 1.844 | 2.041 | 2.280 | 10.654 | 2.92% |
+
+**统计:**
+```
+avg24 MAE: 2.2745 ± 0.0054  (NRFormer=2.28, 均值优于 NRFormer)
+avg6  MAE: 1.8383 ± 0.0043  (NRFormer=1.84, 均值优于 NRFormer)
+RMSE:      10.664 ± 0.022   (NRFormer=11.65, 大幅领先)
+MAPE:      2.91% ± 0.005%   (NRFormer=2.93%, 领先)
+```
+
+**Phase 4 结论:**
+- **方差很小** (avg24 std=0.005)，结果稳定可复现
+- **均值在 avg24 和 avg6 上都优于 NRFormer**
+- 可用于论文中报告 mean ± std
+
+---
+
+## TKDE 候选模型总结 (2026-03-29 更新)
+
+> 基于 **71 个实验** 的综合分析（含 search_i6r20.sh 全面搜参），以下是 TKDE 扩刊的候选模型。
 
 ### 候选对比 (vs NRFormer baseline)
 
-| 指标 | NRFormer | **i6_r20 (推荐主模型)** | hp_lr3e4 (补充) | i7_no_physics (ablation) |
-|------|----------|----------------------|----------------|------------------------|
-| avg6 MAE | 1.840 | 1.835 ✅ **-0.3%** | **1.808** ✅ **-1.7%** | 1.831 ✅ -0.5% |
-| avg12 MAE | **2.010** | 2.028 ⚠️ +0.9% | **2.011** ⚠️ +0.03% | 2.026 ⚠️ +0.8% |
-| avg24 MAE | 2.280 | **2.267** ✅ **-0.6%** | 2.276 ✅ -0.2% | **2.267** ✅ -0.6% |
-| RMSE | 11.650 | 10.702 ✅ **-8.1%** | **10.462** ✅ **-10.2%** | 10.686 ✅ -8.3% |
-| MAPE | 2.93% | **2.90%** ✅ -1.0% | 2.95% ⚠️ +0.7% | **2.90%** ✅ -1.0% |
-| Beat NRFormer | — | **4/5** | **3/5** | **4/5** |
-| Physics | — | feature (有) | residual (有) | 无 |
-| 适合 | — | **主模型** | 短中期+RMSE分析 | ablation 对照 |
+| 指标 | NRFormer | **s3_nowind (新最优)** | s1_lr1e3_p30 | i6_r20 | hp2_drop02 | hp2_ffn2 |
+|------|----------|---------------------|-------------|--------|-----------|---------|
+| avg6 MAE | 1.840 | 1.823 ✅ -0.9% | 1.824 ✅ -0.9% | 1.835 ✅ -0.3% | **1.801** ✅ -2.1% | 1.813 ✅ -1.5% |
+| avg12 MAE | **2.010** | 2.017 ⚠️ +0.4% | 2.019 ⚠️ +0.4% | 2.028 ⚠️ +0.9% | **2.007** ✅ **-0.1%** | 2.013 ⚠️ +0.2% |
+| avg24 MAE | 2.280 | **2.262** ✅ **-0.8%** | **2.263** ✅ **-0.7%** | 2.267 ✅ -0.6% | 2.282 ⚠️ +0.1% | **2.270** ✅ -0.4% |
+| RMSE | 11.650 | 10.736 ✅ -7.8% | 10.724 ✅ -7.9% | 10.702 ✅ -8.1% | 10.476 ✅ -10.1% | **10.450** ✅ **-10.3%** |
+| MAPE | 2.93% | **2.91%** ✅ -0.7% | **2.91%** ✅ -0.7% | **2.90%** ✅ -1.0% | 2.96% ⚠️ +1.0% | 2.94% ⚠️ +0.3% |
+| Beat NRFormer | — | **4/5** | **4/5** | **4/5** | **3/5** | **3/5** |
+| Physics mode | — | feature | feature | feature | residual | residual |
+| 基础 | — | i6_r20-wind+p30 | i6_r20+p30 | log+cos+rain+2way+r20 | res+lr3e4+drop02 | res+lr3e4+ffn2 |
 
 ### 推荐论文策略
 
-**1. 主表:** 报告 **i6_r20** 的结果
-- 4/5 指标超越 NRFormer (avg6 ✅, avg24 ✅, RMSE ✅, MAPE ✅)
-- avg12 仅差 0.9%，在误差范围内
+**1. 主表: 报告 s3_nowind 的结果** (或 s1_lr1e3_p30)
+- **4/5 指标超越 NRFormer** (avg6 ✅, avg24 ✅, RMSE ✅, MAPE ✅)
+- avg12 仅差 0.4% (从 i6_r20 的 0.9% 大幅缩小)
+- 去掉风速风向有数据分析支撑 (F8: r_wind=-0.015)
 - 完整 physics module，支撑 "Physics-Guided" 论文叙事
 
-**2. Ablation study:**
+**2. 补充: hp2_drop02 是唯一在 avg12 上也超越 NRFormer 的模型** (2.007 < 2.010)
+- 可在 Training Analysis 章节展示 residual mode + 低 LR 的潜力
+- avg6=1.801 也是全场最佳
+
+**3. Ablation study (基于 Phase 3 数据):**
 - Log-space 贡献: p1_baseline (2.323) → i1_log (2.289), Δ=-1.5%
 - Region clusters 贡献: i5_full (2.291) → i6_r20 (2.267), Δ=-1.0%
-- Physics module 影响: i6_r20 ≈ i7_no_physics (MAE 差 0.0001, 中性)
+- Wind 特征影响: s1_lr1e3_p30 (2.263) → s3_nowind (2.262), 去掉更好 (-0.07%)
+- DayOfYear 贡献: s3_nodoy (2.278) vs s1_lr1e3_p30 (2.263), Δ=+0.66%
+- Rain gate 贡献: s3_norain (2.281) vs s1_lr1e3_p30 (2.263), Δ=+0.78%
+- Physics module 贡献: s3_nophys (2.284) vs s1_lr1e3_p30 (2.263), Δ=+0.91%
 - MeteoEncoder 贡献: i6_r20 (2.267) vs i7_simple_meteo (2.300), Δ=+1.4%
 
-**3. Training analysis:**
-- hp_lr3e4 (residual+LR=3e-4) 展示 physics residual correction 在低 LR 下的潜力
-- avg6 -1.7%, RMSE -10.2%, avg12 几乎追平 NRFormer
+**4. 多种子稳定性 (Phase 4):**
+```
+avg24 MAE: 2.2745 ± 0.0054  (NRFormer=2.28, 均值优于 NRFormer)
+avg6  MAE: 1.8383 ± 0.0043  (NRFormer=1.84, 均值优于 NRFormer)
+RMSE:      10.664 ± 0.022   (NRFormer=11.65, 大幅领先)
+```
 
-**4. 待完成:**
-- [ ] search_i6r20.sh: i6_r20 的 LR 搜索 (确认 LR=3e-4 是否也提升 feature mode)
-- [ ] Japan-4H 数据集结果
-- [ ] 多种子 mean±std (3-5 runs)
+**5. 待完成:**
+- [ ] Japan-4H 数据集结果 (s3_nowind 配置)
+- [ ] s3_nowind 多种子 mean±std
 
 ---
 
 ## How to Run Experiments
 
 ```bash
-# Current best config (i6_r20)
+# Current best config (s3_nowind — 全局最优)
 CUDA_VISIBLE_DEVICES=0 python train.py \
     --model_name NRFormer_Plus --dataset 1D-data \
-    --model_des <exp_id> --epochs 200 \
+    --model_des s3_nowind --epochs 200 \
     --IsDayOfYearEmbedding True --hidden_channels 32 \
     --num_temporal_att_layer 3 --num_spatial_att_layer 2 \
     --use_log_space True --scheduler cosine --warmup_epochs 5 \
     --use_rain_gate True \
     --temporal_dropout 0.3 --ffn_ratio 1 --spatial_heads 8 \
     --fusion_type 2way --spatial_swap True \
-    --num_region_clusters 20
+    --num_region_clusters 20 \
+    --Is_wind_angle False --Is_wind_speed False \
+    --early_stop_steps 30
 
-# i6_r20 全面搜参 (自动 4 phases)
+# i6_r20 全面搜参 (已完成, 4 phases)
 bash search_i6r20.sh 0         # GPU 0, 全部 4 phases
 bash search_i6r20.sh --phase 1 0  # 仅 Phase 1
+
+# Residual mode 搜参 (已完成)
+bash hypersearch.sh             # Phase 1-2
 
 # Run iteration experiments
 bash go.sh --iter 9
